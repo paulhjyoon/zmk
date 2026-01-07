@@ -1,12 +1,11 @@
 #include "glove80_dongle.dtsi"
 #include "glove80_dongle_left-pinctrl.dtsi"
 
-
 #include <dt-bindings/led/led.h>
 
 / {
-    model = "glove80_lh";
-    compatible = "glove80_lh";
+    model = "glove80_dongle_left";
+    compatible = "glove80_dongle_left";
 
     chosen {
         zmk,underglow = &led_strip;
