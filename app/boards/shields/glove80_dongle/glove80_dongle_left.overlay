@@ -1,1 +1,2 @@
 #include "glove80_dongle.dtsi"
+#include "glove80_dongle_left-pinctrl.dtsi"
