@@ -4,8 +4,8 @@
 #include <dt-bindings/led/led.h>
 
 / {
-    model = "glove80_rh";
-    compatible = "glove80_rh";
+    model = "glove80_dongle_right";
+    compatible = "glove80_dongle_right";
 
     chosen {
         zmk,underglow = &led_strip;
