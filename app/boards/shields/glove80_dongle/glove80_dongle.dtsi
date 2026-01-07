@@ -7,7 +7,7 @@
 #include <nordic/nrf52840_qiaa.dtsi>
 
 #include <dt-bindings/zmk/matrix_transform.h>
-#include "glove80-layouts.dtsi"
+#include "glove80_dongle-layouts.dtsi"
 
 &physical_layout0 {
     transform = <&matrix_transform0>;
