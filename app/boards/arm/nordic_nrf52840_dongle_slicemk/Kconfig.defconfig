@@ -1,0 +1,19 @@
+if BOARD_NORDIC_NRF52840_DONGLE_SLICEMK
+
+config BOARD
+	default "nordic_nrf52840_dongle_slicemk"
+
+if USB
+
+config USB_NRFX
+	default y
+
+config USB_DEVICE_STACK
+	default y
+
+endif # USB
+
+config BT_CTLR
+	default BT
+
+endif # BOARD_NORDIC_NRF52840_DONGLE_SLICEMK

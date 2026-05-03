@@ -1,0 +1,4 @@
+/*
+ * Wrapper keymap: keep a single editable source in config/glove80_dongle.keymap.
+ */
+#include "../../../glove80_dongle.keymap"
