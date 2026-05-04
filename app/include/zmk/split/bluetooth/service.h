@@ -7,7 +7,9 @@
 #pragma once
 
 #include <zmk/events/sensor_event.h>
+#include <zmk/hid_indicators_types.h>
 #include <zmk/sensors.h>
+#include <zmk/ble.h>
 
 #define ZMK_SPLIT_RUN_BEHAVIOR_DEV_LEN 9
 
@@ -36,4 +38,21 @@ struct zmk_split_input_event_payload {
     uint16_t code;
     uint32_t value;
     uint8_t sync;
+} __packed;
+
+/* GLOVE80_DONGLE: Dedicated central USB status channel */
+struct zmk_split_central_usb_status_payload {
+    uint8_t central_usb_state;
+    uint8_t endpoint_is_usb;
+} __packed;
+
+/* GLOVE80_DONGLE: Dedicated central BLE status channel */
+struct zmk_split_central_ble_status_payload {
+    uint8_t active_ble_profile;
+    uint8_t ble_profile_states[ZMK_BLE_PROFILE_COUNT];
+} __packed;
+
+/* GLOVE80_DONGLE: Dedicated central layer status channel */
+struct zmk_split_central_layer_status_payload {
+    uint32_t active_layers_mask;
 } __packed;

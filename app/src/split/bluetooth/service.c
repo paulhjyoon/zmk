@@ -8,7 +8,9 @@
 #include <zephyr/types.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/init.h>
+#include <string.h>
 
 #include <zephyr/logging/log.h>
 
@@ -25,6 +27,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/split/transport/peripheral.h>
 #include <zmk/split/bluetooth/uuid.h>
 #include <zmk/split/bluetooth/service.h>
+#include <zmk/rgb_underglow.h>
 
 #include "peripheral.h"
 
@@ -34,6 +37,13 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/events/sensor_event.h>
 #include <zmk/sensors.h>
+
+/* Match rgb_underglow.c-style indicator node resolution. */
+#if DT_HAS_CHOSEN(zmk_underglow_indicators)
+#define UNDERGLOW_INDICATORS DT_CHOSEN(zmk_underglow_indicators)
+#else
+#define UNDERGLOW_INDICATORS DT_PATH(underglow_indicators)
+#endif
 
 #if ZMK_KEYMAP_HAS_SENSORS
 static struct sensor_event last_sensor_event;
@@ -81,8 +91,11 @@ static zmk_hid_indicators_t hid_indicators = 0;
 
 static void split_svc_update_indicators_callback(struct k_work *work) {
     LOG_DBG("Raising HID indicators changed event: %x", hid_indicators);
-    raise_zmk_hid_indicators_changed(
-        (struct zmk_hid_indicators_changed){.indicators = hid_indicators});
+    raise_zmk_hid_indicators_changed((struct zmk_hid_indicators_changed){.indicators = hid_indicators});
+
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+    zmk_rgb_underglow_set_cached_hid_indicators(hid_indicators);
+#endif
 }
 
 static K_WORK_DEFINE(split_svc_update_indicators_work, split_svc_update_indicators_callback);
@@ -93,15 +106,93 @@ static ssize_t split_svc_update_indicators(struct bt_conn *conn, const struct bt
     if (offset + len > sizeof(zmk_hid_indicators_t)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
-
     memcpy((uint8_t *)&hid_indicators + offset, buf, len);
-
     k_work_submit(&split_svc_update_indicators_work);
+    return len;
+}
+#endif
 
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+static struct zmk_split_central_usb_status_payload usb_status_cache;
+static struct zmk_split_central_ble_status_payload ble_status_cache;
+static bool usb_status_cache_valid;
+static bool ble_status_cache_valid;
+#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
+static struct zmk_split_central_layer_status_payload layer_status_cache;
+static bool layer_status_cache_valid;
+#endif
+
+static void split_svc_update_usb_status_callback(struct k_work *work) {
+    zmk_rgb_underglow_set_cached_usb_status(
+        (enum zmk_usb_conn_state)usb_status_cache.central_usb_state, usb_status_cache.endpoint_is_usb != 0);
+}
+static K_WORK_DEFINE(split_svc_update_usb_status_work, split_svc_update_usb_status_callback);
+
+static void split_svc_update_ble_status_callback(struct k_work *work) {
+    zmk_rgb_underglow_set_cached_ble_status(ble_status_cache.active_ble_profile,
+                                            ble_status_cache.ble_profile_states,
+                                            ARRAY_SIZE(ble_status_cache.ble_profile_states));
+}
+static K_WORK_DEFINE(split_svc_update_ble_status_work, split_svc_update_ble_status_callback);
+
+#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
+static void split_svc_update_layer_status_callback(struct k_work *work) {
+    zmk_rgb_underglow_set_cached_layer_status(layer_status_cache.active_layers_mask);
+}
+static K_WORK_DEFINE(split_svc_update_layer_status_work, split_svc_update_layer_status_callback);
+#endif
+
+static ssize_t split_svc_update_usb_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                           const void *buf, uint16_t len, uint16_t offset,
+                                           uint8_t flags) {
+    ARG_UNUSED(conn); ARG_UNUSED(attr); ARG_UNUSED(flags);
+    if (offset != 0 || len != sizeof(usb_status_cache)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    if (usb_status_cache_valid && memcmp(&usb_status_cache, buf, sizeof(usb_status_cache)) == 0) {
+        return len;
+    }
+    memcpy(&usb_status_cache, buf, sizeof(usb_status_cache));
+    usb_status_cache_valid = true;
+    k_work_submit(&split_svc_update_usb_status_work);
     return len;
 }
 
-#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+static ssize_t split_svc_update_ble_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                           const void *buf, uint16_t len, uint16_t offset,
+                                           uint8_t flags) {
+    ARG_UNUSED(conn); ARG_UNUSED(attr); ARG_UNUSED(flags);
+    if (offset != 0 || len != sizeof(ble_status_cache)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    if (ble_status_cache_valid && memcmp(&ble_status_cache, buf, sizeof(ble_status_cache)) == 0) {
+        return len;
+    }
+    memcpy(&ble_status_cache, buf, sizeof(ble_status_cache));
+    ble_status_cache_valid = true;
+    k_work_submit(&split_svc_update_ble_status_work);
+    return len;
+}
+
+#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
+static ssize_t split_svc_update_layer_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                             const void *buf, uint16_t len, uint16_t offset,
+                                             uint8_t flags) {
+    ARG_UNUSED(conn); ARG_UNUSED(attr); ARG_UNUSED(flags);
+    if (offset != 0 || len != sizeof(layer_status_cache)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    if (layer_status_cache_valid &&
+        memcmp(&layer_status_cache, buf, sizeof(layer_status_cache)) == 0) {
+        return len;
+    }
+    memcpy(&layer_status_cache, buf, sizeof(layer_status_cache));
+    layer_status_cache_valid = true;
+    k_work_submit(&split_svc_update_layer_status_work);
+    return len;
+}
+#endif
+#endif /* IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) */ 
 
 static uint8_t selected_phys_layout = 0;
 
@@ -201,6 +292,19 @@ BT_GATT_SERVICE_DEFINE(
                                BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,
                                split_svc_update_indicators, NULL),
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+        BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CENTRAL_USB_STATUS_UUID),
+                               BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,
+                               split_svc_update_usb_status, NULL),
+        BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CENTRAL_BLE_STATUS_UUID),
+                               BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,
+                               split_svc_update_ble_status, NULL),
+#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
+        BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CENTRAL_LAYER_STATUS_UUID),
+                               BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,
+                               split_svc_update_layer_status, NULL),
+#endif
+#endif
     BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_SELECT_PHYS_LAYOUT_UUID),
                            BT_GATT_CHRC_WRITE | BT_GATT_CHRC_READ,
                            BT_GATT_PERM_WRITE_ENCRYPT | BT_GATT_PERM_READ_ENCRYPT,

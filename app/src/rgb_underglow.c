@@ -36,6 +36,143 @@
 #include <zmk/split/central.h>
 #endif
 
+#include <zmk/split/bluetooth/service.h>
+#include <stdint.h>
+#include <string.h>
+
+/* GLOVE80_DONGLE: Indicator cache helpers (must be declared before use) */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+
+static zmk_hid_indicators_t cached_hid_indicators;
+static uint32_t cached_active_layers_mask;
+static uint8_t cached_ble_profile;
+static uint8_t cached_ble_profile_states[ZMK_BLE_PROFILE_COUNT];
+static bool cached_endpoint_is_usb;
+static enum zmk_usb_conn_state cached_central_usb_state = ZMK_USB_CONN_NONE;
+
+static inline zmk_hid_indicators_t zmk_cached_hid_indicators(void) { return cached_hid_indicators; }
+
+static inline bool zmk_cached_layer_active(uint8_t layer) {
+    if (layer >= 32) {
+        return false;
+    }
+    return (cached_active_layers_mask & BIT(layer)) != 0;
+}
+
+/* GLOVE80_DONGLE: Cache shim signature matches no-arg callsites. */
+static inline bool zmk_cached_endpoint_is_active(void) {
+    /*
+     * "Selected endpoint is USB" != "selected endpoint is active".
+     * Use cached central status for peripheral-side rendering.
+     */
+    if (cached_endpoint_is_usb) {
+        return cached_central_usb_state == ZMK_USB_CONN_HID;
+    }
+
+    /*
+     * BLE profile status:
+     * 0 = disconnected, non-zero = connected/active-ish.
+     */
+    if (cached_ble_profile < ARRAY_SIZE(cached_ble_profile_states)) {
+        return cached_ble_profile_states[cached_ble_profile] != 0;
+    }
+    return false;
+}
+
+static inline uint8_t zmk_cached_ble_profile_index(void) { return cached_ble_profile; }
+
+static inline uint8_t zmk_cached_ble_profile_status(uint8_t profile) {
+    if (profile >= ARRAY_SIZE(cached_ble_profile_states)) {
+        return 0;
+    }
+
+    return cached_ble_profile_states[profile];
+}
+
+/* GLOVE80_DONGLE: Central USB state delivered via split transport into cache. */
+static inline enum zmk_usb_conn_state zmk_cached_central_usb_state(void) {
+    return cached_central_usb_state;
+}
+
+static inline bool zmk_cached_endpoint_is_usb_selected(void) {
+    return cached_endpoint_is_usb;
+}
+#else
+
+static inline zmk_hid_indicators_t zmk_cached_hid_indicators(void) {
+    return zmk_hid_indicators_get_current_profile();
+}
+
+static inline bool zmk_cached_layer_active(uint8_t layer) { return zmk_keymap_layer_active(layer); }
+
+/* GLOVE80_DONGLE: Keep no-arg signature used by transformed callsites. */
+static inline bool zmk_cached_endpoint_is_active(void) {
+    struct zmk_endpoint_instance selected = zmk_endpoints_selected();
+    return zmk_endpoints_preferred_transport_is_active(selected.transport);
+}
+
+static inline uint8_t zmk_cached_ble_profile_index(void) { return zmk_ble_active_profile_index(); }
+
+static inline uint8_t zmk_cached_ble_profile_status(uint8_t profile) {
+    return zmk_ble_profile_status(profile);
+}
+
+/* GLOVE80_DONGLE: On central-capable builds, central USB is the local USB state. */
+static inline enum zmk_usb_conn_state zmk_cached_central_usb_state(void) {
+    return zmk_usb_get_conn_state();
+}
+
+static inline bool zmk_cached_endpoint_is_usb_selected(void) {
+    struct zmk_endpoint_instance selected = zmk_endpoints_selected();
+    return selected.transport == ZMK_TRANSPORT_USB;
+}
+#endif /* CONFIG_ZMK_SPLIT && !CONFIG_ZMK_SPLIT_ROLE_CENTRAL */
+
+void zmk_rgb_underglow_set_cached_hid_indicators(zmk_hid_indicators_t indicators) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    cached_hid_indicators = indicators;
+#else
+    ARG_UNUSED(indicators);
+#endif
+}
+
+void zmk_rgb_underglow_set_cached_ble_status(uint8_t active_ble_profile,
+                                             const uint8_t *ble_profile_states,
+                                             size_t ble_profile_states_len) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    cached_ble_profile = active_ble_profile;
+
+    memset(cached_ble_profile_states, 0, sizeof(cached_ble_profile_states));
+    if (ble_profile_states && ble_profile_states_len > 0) {
+        size_t copy_len = MIN(ble_profile_states_len, ARRAY_SIZE(cached_ble_profile_states));
+        memcpy(cached_ble_profile_states, ble_profile_states, copy_len);
+    }
+#else
+    ARG_UNUSED(active_ble_profile);
+    ARG_UNUSED(ble_profile_states);
+    ARG_UNUSED(ble_profile_states_len);
+#endif
+}
+
+void zmk_rgb_underglow_set_cached_usb_status(enum zmk_usb_conn_state central_usb_state,
+                                             bool endpoint_is_usb) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    cached_central_usb_state = central_usb_state;
+    cached_endpoint_is_usb = endpoint_is_usb;
+#else
+    ARG_UNUSED(central_usb_state);
+    ARG_UNUSED(endpoint_is_usb);
+#endif
+}
+
+void zmk_rgb_underglow_set_cached_layer_status(uint32_t active_layers_mask) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    cached_active_layers_mask = active_layers_mask;
+#else
+    ARG_UNUSED(active_layers_mask);
+#endif
+}
+
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if !DT_HAS_CHOSEN(zmk_underglow)
@@ -217,8 +354,7 @@ static void zmk_led_write_pixels(void) {
     if (bat0 < 10) {
         memset(pixels, 0, sizeof(struct led_rgb) * STRIP_NUM_PIXELS);
         if (state.on) {
-            int c_power = ext_power_get(ext_power);
-            if (c_power && !state.status_active) {
+            if (!state.status_active) {
                 // power is on, RGB underglow is on, but battery is too low
                 state.on = false;
                 reset_ext_power = true;
@@ -266,22 +402,29 @@ static void zmk_led_write_pixels(void) {
     }
 }
 
-#define UNDERGLOW_INDICATORS DT_PATH(underglow_indicators)
-
-#if defined(DT_N_S_underglow_indicators_EXISTS)
-#define UNDERGLOW_INDICATORS_ENABLED 1
+#if DT_HAS_CHOSEN(zmk_underglow_indicators)
+#define UNDERGLOW_INDICATORS DT_CHOSEN(zmk_underglow_indicators)
 #else
-#define UNDERGLOW_INDICATORS_ENABLED 0
+#define UNDERGLOW_INDICATORS DT_PATH(underglow_indicators)
 #endif
 
-#if !UNDERGLOW_INDICATORS_ENABLED
+#if !DT_NODE_EXISTS(DT_PATH(underglow_indicators))
 static int zmk_led_generate_status(void) { return 0; }
 #else
 
-const uint8_t underglow_layer_state[] = DT_PROP(UNDERGLOW_INDICATORS, layer_state);
-const uint8_t underglow_ble_state[] = DT_PROP(UNDERGLOW_INDICATORS, ble_state);
+/* GLOVE80_DONGLE: Always keep bat_lhs enabled */
 const uint8_t underglow_bat_lhs[] = DT_PROP(UNDERGLOW_INDICATORS, bat_lhs);
+
+/* GLOVE80_DONGLE: LHS-only DT properties. */
+#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
+const uint8_t underglow_layer_state[] = DT_PROP(UNDERGLOW_INDICATORS, layer_state);
+#endif
+#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, ble_state)
+const uint8_t underglow_ble_state[] = DT_PROP(UNDERGLOW_INDICATORS, ble_state);
+#endif
+#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, bat_rhs)
 const uint8_t underglow_bat_rhs[] = DT_PROP(UNDERGLOW_INDICATORS, bat_rhs);
+#endif
 
 #define HEXRGB(R, G, B)                                                                            \
     ((struct led_rgb){                                                                             \
@@ -337,7 +480,9 @@ static int zmk_led_generate_status(void) {
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     zmk_led_battery_level(zmk_battery_state_of_charge(), underglow_bat_lhs,
                           DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_lhs));
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
+/* GLOVE80_DONGLE: Guard RHS and optional bat_rhs for peripheral battery indicator. */
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING) && \
+    !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, bat_rhs)
     uint8_t peripheral_level = 0;
     int rc = zmk_split_central_get_peripheral_battery_level(0, &peripheral_level);
 
@@ -349,38 +494,48 @@ static int zmk_led_generate_status(void) {
     } else if (rc == -EINVAL) {
         LOG_ERR("Invalid peripheral index requested for battery level read: 0");
     }
-#endif // CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING
+#endif // CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING && !RHS && bat_rhs
 #endif // CONFIG_ZMK_BATTERY_REPORTING
 
+#if !defined(CONFIG_BOARD_GLOVE80_RH)
+    /* GLOVE80_DONGLE: Use cached central endpoint selection on peripherals. */
+    bool usb_output_active = zmk_cached_endpoint_is_usb_selected();
     // CAPSLOCK/NUMLOCK/SCROLLOCK STATUS
-    zmk_hid_indicators_t led_flags = zmk_hid_indicators_get_current_profile();
+    zmk_hid_indicators_t led_flags = zmk_cached_hid_indicators();
 
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, capslock)
     if (led_flags & ZMK_LED_CAPSLOCK_BIT)
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, capslock)] = red;
+#endif
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, numlock)
     if (led_flags & ZMK_LED_NUMLOCK_BIT)
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, numlock)] = red;
+#endif
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, scrolllock)
     if (led_flags & ZMK_LED_SCROLLLOCK_BIT)
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, scrolllock)] = red;
+#endif
 
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
     // LAYER STATUS
     for (uint8_t i = 0; i < DT_PROP_LEN(UNDERGLOW_INDICATORS, layer_state); i++) {
-        if (zmk_keymap_layer_active(i))
+        if (zmk_cached_layer_active(i))
             status_pixels[underglow_layer_state[i]] = magenta;
     }
+#endif
 
-    struct zmk_endpoint_instance active_endpoint = zmk_endpoints_selected();
-
-    if (!zmk_endpoints_preferred_transport_is_active())
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, output_fallback)
+    if (!zmk_cached_endpoint_is_active())
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, output_fallback)] = red;
+#endif
 
-#if IS_ENABLED(CONFIG_ZMK_BLE)
-    int active_ble_profile_index = zmk_ble_active_profile_index();
+#if IS_ENABLED(CONFIG_ZMK_BLE) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, ble_state)
+    int active_ble_profile_index = zmk_cached_ble_profile_index();
     for (uint8_t i = 0;
          i < MIN(ZMK_BLE_PROFILE_COUNT, DT_PROP_LEN(UNDERGLOW_INDICATORS, ble_state)); i++) {
-        int8_t status = zmk_ble_profile_status(i);
+        int8_t status = zmk_cached_ble_profile_status(i);
         int ble_pixel = underglow_ble_state[i];
-        if (status == 2 && active_endpoint.transport == ZMK_TRANSPORT_BLE &&
-            active_ble_profile_index == i) { // connected AND active
+        if (status == 2 && !usb_output_active && active_ble_profile_index == i) { // connected AND active
             status_pixels[ble_pixel] = white;
         } else if (status == 2) { // connected
             status_pixels[ble_pixel] = dull_green;
@@ -390,19 +545,40 @@ static int zmk_led_generate_status(void) {
             status_pixels[ble_pixel] = lilac;
         }
     }
+#endif // CONFIG_ZMK_BLE && ble_state
+#endif // CONFIG_BOARD_GLOVE80_RH
+
+/* GLOVE80_DONGLE: LHS-only indicator for dongle central USB state. */
+#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, central_usb)
+    enum zmk_usb_conn_state central_usb_state = zmk_cached_central_usb_state();
+    uint8_t central_usb_px = DT_PROP_BY_IDX(UNDERGLOW_INDICATORS, central_usb, 0);
+    if (central_usb_state == ZMK_USB_CONN_HID) { // connected
+        status_pixels[central_usb_px] = white;
+    } else if (central_usb_state == ZMK_USB_CONN_POWERED) { // powered
+        status_pixels[central_usb_px] = red;
+    } else if (central_usb_state == ZMK_USB_CONN_NONE) { // disconnected
+        status_pixels[central_usb_px] = lilac;
+    }
 #endif
 
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, usb_state)
     enum zmk_usb_conn_state usb_state = zmk_usb_get_conn_state();
-    if (usb_state == ZMK_USB_CONN_HID &&
-        active_endpoint.transport == ZMK_TRANSPORT_USB) { // connected AND active
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    if (usb_state == ZMK_USB_CONN_HID) { // connected (local peripheral USB only)
+        status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = white;
+    } else if (usb_state == ZMK_USB_CONN_POWERED) { // powered
+#else
+    if (usb_state == ZMK_USB_CONN_HID && usb_output_active) { // connected AND active
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = white;
     } else if (usb_state == ZMK_USB_CONN_HID) { // connected
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = dull_green;
     } else if (usb_state == ZMK_USB_CONN_POWERED) { // powered
+#endif
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = red;
     } else if (usb_state == ZMK_USB_CONN_NONE) { // disconnected
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = lilac;
     }
+#endif
 
     int16_t blend = 256;
     if (state.status_animation_step < (500 / 25)) {

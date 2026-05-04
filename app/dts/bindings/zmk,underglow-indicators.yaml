@@ -5,31 +5,37 @@ description: Underglow indicators
 
 compatible: "zmk,underglow-indicators"
 
+# GLOVE80_DONGLE: Optional indicator for most properties and add new dongle-central USB output state.
 properties:
   bat-lhs:
     type: array
     required: true
   bat-rhs:
     type: array
-    required: true
+    required: false
   capslock:
     type: int
-    required: true
+    required: false
   numlock:
     type: int
-    required: true
+    required: false
   scrolllock:
     type: int
-    required: true
+    required: false
   layer-state:
     type: array
-    required: true
+    required: false
   ble-state:
     type: array
-    required: true
+    required: false
   usb-state:
     type: int
-    required: true
+    required: false
   output-fallback:
     type: int
-    required: true
+    required: false
+  central-usb:
+    type: array
+    required: false
+    description: >
+      LED indices indicating that the dongle central is outputting USB

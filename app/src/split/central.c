@@ -9,6 +9,7 @@
 #include <zmk/stdlib.h>
 #include <zmk/split/transport/central.h>
 #include <zmk/split/central.h>
+#include <zmk/hid_indicators.h>
 #include <zmk/hid_indicators_types.h>
 #include <zmk/pointing/input_split.h>
 
