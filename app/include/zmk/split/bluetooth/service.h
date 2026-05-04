@@ -49,7 +49,8 @@ struct zmk_split_central_usb_status_payload {
 /* GLOVE80_DONGLE: Dedicated central BLE status channel */
 struct zmk_split_central_ble_status_payload {
     uint8_t active_ble_profile;
-    uint8_t ble_profile_states[ZMK_BLE_PROFILE_COUNT];
+    uint8_t profile_count;
+    /* Followed on-wire by profile_count bytes of BLE profile state data. */
 } __packed;
 
 /* GLOVE80_DONGLE: Dedicated central layer status channel */

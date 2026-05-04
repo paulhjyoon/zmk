@@ -131,20 +131,34 @@ static const struct behavior_parameter_metadata metadata = {
 
 #endif // IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
 
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+static bool central_rgb_on = IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_ON_START);
+#endif
+
 static int
 on_keymap_binding_convert_central_state_dependent_params(struct zmk_behavior_binding *binding,
                                                          struct zmk_behavior_binding_event event) {
     switch (binding->param1) {
     case RGB_TOG_CMD: {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+        binding->param1 = central_rgb_on ? RGB_OFF_CMD : RGB_ON_CMD;
+        break;
+#else
         bool state;
         int err = zmk_rgb_underglow_get_state(&state);
         if (err) {
+            if (err == -ENODEV) {
+                // On dongle-central builds without a usable local strip state,
+                // preserve raw toggle semantics instead of failing conversion.
+                return 0;
+            }
             LOG_ERR("Failed to get RGB underglow state (err %d)", err);
             return err;
         }
 
         binding->param1 = state ? RGB_OFF_CMD : RGB_ON_CMD;
         break;
+#endif
     }
     case RGB_BRI_CMD: {
         struct zmk_led_hsb color = zmk_rgb_underglow_calc_brt(1);
@@ -209,6 +223,19 @@ on_keymap_binding_convert_central_state_dependent_params(struct zmk_behavior_bin
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    switch (binding->param1) {
+    case RGB_ON_CMD:
+        central_rgb_on = true;
+        break;
+    case RGB_OFF_CMD:
+        central_rgb_on = false;
+        break;
+    default:
+        break;
+    }
+#endif
+
     switch (binding->param1) {
     case RGB_TOG_CMD:
         return zmk_rgb_underglow_toggle();

@@ -33,6 +33,18 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/events/layer_state_changed.h>
 #include <zmk/events/endpoint_changed.h>
 #include <zmk/events/ble_active_profile_changed.h>
+    
+#if defined(__has_include)
+#if __has_include(<zmk/events/ble_profile_changed.h>)
+#include <zmk/events/ble_profile_changed.h>
+#define ZMK_HAS_BLE_PROFILE_CHANGED_EVENT 1
+#endif
+#endif
+
+#ifndef ZMK_HAS_BLE_PROFILE_CHANGED_EVENT
+#define ZMK_HAS_BLE_PROFILE_CHANGED_EVENT 0
+#endif
+
 #include <zmk/events/sensor_event.h>
 #include <zmk/events/battery_state_changed.h>
 #include <zmk/pointing/input_split.h>
@@ -73,7 +85,8 @@ struct peripheral_slot {
     uint16_t central_ble_status_handle;
     uint16_t central_layer_status_handle;
     struct zmk_split_central_usb_status_payload last_usb_status;
-    struct zmk_split_central_ble_status_payload last_ble_status;
+    uint8_t last_ble_status[sizeof(struct zmk_split_central_ble_status_payload) +
+                            ZMK_BLE_PROFILE_COUNT];
     struct zmk_split_central_layer_status_payload last_layer_status;
     bool last_usb_status_valid;
     bool last_ble_status_valid;
@@ -81,6 +94,7 @@ struct peripheral_slot {
 #endif
     uint16_t selected_physical_layout_handle;
     uint8_t position_state[POSITION_STATE_DATA_LEN];
+    uint8_t last_ble_status_len;
     uint8_t changed_positions[POSITION_STATE_DATA_LEN];
 };
 
@@ -158,6 +172,16 @@ static bool is_scanning = false;
 
 static const struct bt_uuid_128 split_service_uuid = BT_UUID_INIT_128(ZMK_SPLIT_BT_SERVICE_UUID);
 
+#define CENTRAL_STATUS_COALESCE_MS 30
+#define CENTRAL_STATUS_DIRTY_USB BIT(0)
+#define CENTRAL_STATUS_DIRTY_BLE BIT(1)
+#define CENTRAL_STATUS_DIRTY_LAYER BIT(2)
+
+static uint8_t central_status_dirty_flags;
+
+static void central_status_broadcast_work_cb(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(central_status_broadcast_work, central_status_broadcast_work_cb);
+
 static int send_central_usb_status_to_slot(struct peripheral_slot *slot) {
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
     if (!slot->central_usb_status_handle || !slot->conn) {
@@ -183,24 +207,55 @@ static int send_central_usb_status_to_slot(struct peripheral_slot *slot) {
 #endif
 }
 
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+static int send_hid_indicators_to_slot(struct peripheral_slot *slot,
+                                       zmk_hid_indicators_t indicators) {
+    if (!slot || slot->state != PERIPHERAL_SLOT_STATE_CONNECTED || !slot->conn) {
+        return -ENOTCONN;
+    }
+    if (!slot->update_hid_indicators) {
+        return -ENODEV;
+    }
+    if (bt_conn_get_security(slot->conn) < BT_SECURITY_L2) {
+        return -EAGAIN;
+    }
+
+    return bt_gatt_write_without_response(slot->conn, slot->update_hid_indicators, &indicators,
+                                          sizeof(indicators), true);
+}
+
+static int send_current_hid_indicators_to_slot(struct peripheral_slot *slot) {
+    return send_hid_indicators_to_slot(slot, zmk_hid_indicators_get_current_profile());
+}
+#endif
+
 static int send_central_ble_status_to_slot(struct peripheral_slot *slot) {
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_BLE)
     if (!slot->central_ble_status_handle || !slot->conn) {
         return -ENODEV;
     }
-    struct zmk_split_central_ble_status_payload p = {0};
-    p.active_ble_profile = zmk_ble_active_profile_index();
-    for (uint8_t i = 0; i < ARRAY_SIZE(p.ble_profile_states); i++) {
-        p.ble_profile_states[i] = zmk_ble_profile_status(i);
+    uint8_t payload[sizeof(struct zmk_split_central_ble_status_payload) + ZMK_BLE_PROFILE_COUNT] = {0};
+    struct zmk_split_central_ble_status_payload *p =
+        (struct zmk_split_central_ble_status_payload *)payload;
+
+    p->active_ble_profile = zmk_ble_active_profile_index();
+    p->profile_count = ZMK_BLE_PROFILE_COUNT;
+
+    for (uint8_t i = 0; i < p->profile_count; i++) {
+        payload[sizeof(*p) + i] = zmk_ble_profile_status(i);
     }
-    if (slot->last_ble_status_valid && memcmp(&slot->last_ble_status, &p, sizeof(p)) == 0) {
+
+    size_t payload_len = sizeof(*p) + p->profile_count;
+    if (slot->last_ble_status_valid && slot->last_ble_status_len == payload_len &&
+        memcmp(slot->last_ble_status, payload, payload_len) == 0) {
         return 0;
     }
 
-    int err = bt_gatt_write_without_response(slot->conn, slot->central_ble_status_handle, &p,
-                                             sizeof(p), true);
+    int err = bt_gatt_write_without_response(slot->conn, slot->central_ble_status_handle, payload,
+                                             payload_len, true);
     if (!err) {
-        slot->last_ble_status = p;
+        memcpy(slot->last_ble_status, payload, payload_len);
+        slot->last_ble_status_len = payload_len;
         slot->last_ble_status_valid = true;
     }
     return err;
@@ -263,6 +318,28 @@ static void broadcast_central_ble_status(void) {
         if (peripherals[i].state == PERIPHERAL_SLOT_STATE_CONNECTED) {
             (void)send_central_ble_status_to_slot(&peripherals[i]);
         }
+    }
+}
+
+static void schedule_central_status_broadcast(uint8_t flags) {
+    central_status_dirty_flags |= flags;
+    (void)k_work_reschedule(&central_status_broadcast_work, K_MSEC(CENTRAL_STATUS_COALESCE_MS));
+}
+
+static void central_status_broadcast_work_cb(struct k_work *work) {
+    ARG_UNUSED(work);
+
+    uint8_t flags = central_status_dirty_flags;
+    central_status_dirty_flags = 0;
+
+    if (flags & CENTRAL_STATUS_DIRTY_USB) {
+        broadcast_central_usb_status();
+    }
+    if (flags & CENTRAL_STATUS_DIRTY_BLE) {
+        broadcast_central_ble_status();
+    }
+    if (flags & CENTRAL_STATUS_DIRTY_LAYER) {
+        broadcast_central_layer_status();
     }
 }
 
@@ -358,6 +435,7 @@ int release_peripheral_slot(int index) {
     slot->central_layer_status_handle = 0;
     slot->last_usb_status_valid = false;
     slot->last_ble_status_valid = false;
+    slot->last_ble_status_len = 0;
     slot->last_layer_status_valid = false;
 #endif
 
@@ -762,6 +840,11 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
                                 BT_UUID_DECLARE_128(ZMK_SPLIT_BT_UPDATE_HID_INDICATORS_UUID))) {
             LOG_DBG("Found update HID indicators handle");
             slot->update_hid_indicators = bt_gatt_attr_value_handle(attr);
+            if (bt_conn_get_security(conn) >= BT_SECURITY_L2) {
+                (void)send_current_hid_indicators_to_slot(slot);
+            } else {
+                LOG_DBG("HID indicator sync deferred until security L2");
+            }
 #endif
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
         } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
@@ -1178,6 +1261,10 @@ static void split_central_security_changed(struct bt_conn *conn, bt_security_t l
 
     k_work_submit(&update_peripherals_selected_layouts_work);
 
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+    (void)send_current_hid_indicators_to_slot(slot);
+#endif
+
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
     (void)send_central_usb_status_to_slot(slot);
 #if IS_ENABLED(CONFIG_ZMK_BLE)
@@ -1254,25 +1341,14 @@ void split_central_split_run_callback(struct k_work *work) {
             break;
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
         case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_HID_INDICATORS:
-            LOG_WRN("do the indicators dance");
-            if (peripherals[payload_wrapper.source].update_hid_indicators == 0) {
-                // It appears that sometimes the peripheral is considered connected
-                // before the GATT characteristics have been discovered. If this is
-                // the case, the update_hid_indicators handle will not yet be set.
-                LOG_WRN("NO HANDLE TO SET ON PERIPHERAL");
-                break;
-            }
-
+        {
             zmk_hid_indicators_t indicators = payload_wrapper.cmd.data.set_hid_indicators.indicators;
-            int err = bt_gatt_write_without_response(
-                peripherals[payload_wrapper.source].conn,
-                peripherals[payload_wrapper.source].update_hid_indicators,
-                &indicators, sizeof(indicators), true);
-
+            int err = send_hid_indicators_to_slot(&peripherals[payload_wrapper.source], indicators);
             if (err) {
                 LOG_ERR("Failed to write HID indicator characteristic (err %d)", err);
             }
             break;
+        }
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
         default:
             LOG_WRN("Unsupported wrapped central command type %d", payload_wrapper.cmd.type);
@@ -1326,6 +1402,7 @@ static int zmk_split_bt_central_init(void) {
     k_work_queue_start(&split_central_split_run_q, split_central_split_run_q_stack,
                        K_THREAD_STACK_SIZEOF(split_central_split_run_q_stack),
                        CONFIG_ZMK_BLE_THREAD_PRIORITY, NULL);
+    k_work_init_delayable(&central_status_broadcast_work, central_status_broadcast_work_cb);
     bt_conn_cb_register(&conn_callbacks);
 
 #if IS_ENABLED(CONFIG_SETTINGS)
@@ -1343,26 +1420,31 @@ static int zmk_split_bt_central_listener_cb(const zmk_event_t *eh) {
         k_work_submit(&update_peripherals_selected_layouts_work);
     }
     if (as_zmk_layer_state_changed(eh)) {
-        broadcast_central_layer_status();
+        schedule_central_status_broadcast(CENTRAL_STATUS_DIRTY_LAYER);
     }
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
     if (as_zmk_usb_conn_state_changed(eh)) {
-        broadcast_central_usb_status();
+        schedule_central_status_broadcast(CENTRAL_STATUS_DIRTY_USB);
         /* On USB power-on (any USB state), sync all central state to peripherals. */
         const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
         if (ev->conn_state != ZMK_USB_CONN_NONE) {
             /* USB just became available; ensure peripherals have current state. */
-            broadcast_central_ble_status();
-            broadcast_central_layer_status();
+            schedule_central_status_broadcast(CENTRAL_STATUS_DIRTY_BLE |
+                                              CENTRAL_STATUS_DIRTY_LAYER);
         }
     }
     if (as_zmk_endpoint_changed(eh)) {
-        broadcast_central_usb_status();
+        schedule_central_status_broadcast(CENTRAL_STATUS_DIRTY_USB);
     }
 #if IS_ENABLED(CONFIG_ZMK_BLE)
     if (as_zmk_ble_active_profile_changed(eh)) {
-        broadcast_central_ble_status();
+        schedule_central_status_broadcast(CENTRAL_STATUS_DIRTY_BLE);
     }
+#if ZMK_HAS_BLE_PROFILE_CHANGED_EVENT
+    if (as_zmk_ble_profile_changed(eh)) {
+        schedule_central_status_broadcast(CENTRAL_STATUS_DIRTY_BLE);
+    }
+#endif
 #endif
 #endif
     return ZMK_EV_EVENT_BUBBLE;
@@ -1375,6 +1457,9 @@ ZMK_SUBSCRIPTION(zmk_split_bt_central, zmk_usb_conn_state_changed);
 ZMK_SUBSCRIPTION(zmk_split_bt_central, zmk_endpoint_changed);
 #if IS_ENABLED(CONFIG_ZMK_BLE)
 ZMK_SUBSCRIPTION(zmk_split_bt_central, zmk_ble_active_profile_changed);
+#if ZMK_HAS_BLE_PROFILE_CHANGED_EVENT
+ZMK_SUBSCRIPTION(zmk_split_bt_central, zmk_ble_profile_changed);
+#endif
 #endif
 
 static int split_central_bt_send_command(uint8_t source,

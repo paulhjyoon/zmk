@@ -40,13 +40,26 @@
 #include <stdint.h>
 #include <string.h>
 
+#if DT_HAS_CHOSEN(zmk_underglow_indicators)
+#define UNDERGLOW_INDICATORS DT_CHOSEN(zmk_underglow_indicators)
+#else
+#define UNDERGLOW_INDICATORS DT_PATH(underglow_indicators)
+#endif
+
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, ble_state)
+#define ZMK_RGB_UNDERGLOW_BLE_CACHE_SIZE DT_PROP_LEN(UNDERGLOW_INDICATORS, ble_state)
+#else
+#define ZMK_RGB_UNDERGLOW_BLE_CACHE_SIZE 0
+#endif
+
 /* GLOVE80_DONGLE: Indicator cache helpers (must be declared before use) */
 #if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
 static zmk_hid_indicators_t cached_hid_indicators;
 static uint32_t cached_active_layers_mask;
 static uint8_t cached_ble_profile;
-static uint8_t cached_ble_profile_states[ZMK_BLE_PROFILE_COUNT];
+static uint8_t cached_ble_profile_count;
+static uint8_t cached_ble_profile_states[MAX(1, ZMK_RGB_UNDERGLOW_BLE_CACHE_SIZE)];
 static bool cached_endpoint_is_usb;
 static enum zmk_usb_conn_state cached_central_usb_state = ZMK_USB_CONN_NONE;
 
@@ -137,18 +150,22 @@ void zmk_rgb_underglow_set_cached_hid_indicators(zmk_hid_indicators_t indicators
 }
 
 void zmk_rgb_underglow_set_cached_ble_status(uint8_t active_ble_profile,
+                                             uint8_t profile_count,
                                              const uint8_t *ble_profile_states,
                                              size_t ble_profile_states_len) {
 #if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     cached_ble_profile = active_ble_profile;
+    cached_ble_profile_count = MIN(profile_count, (uint8_t)ZMK_RGB_UNDERGLOW_BLE_CACHE_SIZE);
 
     memset(cached_ble_profile_states, 0, sizeof(cached_ble_profile_states));
+
     if (ble_profile_states && ble_profile_states_len > 0) {
-        size_t copy_len = MIN(ble_profile_states_len, ARRAY_SIZE(cached_ble_profile_states));
+        size_t copy_len = MIN(ble_profile_states_len, (size_t)cached_ble_profile_count);
         memcpy(cached_ble_profile_states, ble_profile_states, copy_len);
     }
 #else
     ARG_UNUSED(active_ble_profile);
+    ARG_UNUSED(profile_count);
     ARG_UNUSED(ble_profile_states);
     ARG_UNUSED(ble_profile_states_len);
 #endif
@@ -402,12 +419,6 @@ static void zmk_led_write_pixels(void) {
     }
 }
 
-#if DT_HAS_CHOSEN(zmk_underglow_indicators)
-#define UNDERGLOW_INDICATORS DT_CHOSEN(zmk_underglow_indicators)
-#else
-#define UNDERGLOW_INDICATORS DT_PATH(underglow_indicators)
-#endif
-
 #if !DT_NODE_EXISTS(DT_PATH(underglow_indicators))
 static int zmk_led_generate_status(void) { return 0; }
 #else
@@ -531,8 +542,15 @@ static int zmk_led_generate_status(void) {
 
 #if IS_ENABLED(CONFIG_ZMK_BLE) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, ble_state)
     int active_ble_profile_index = zmk_cached_ble_profile_index();
-    for (uint8_t i = 0;
-         i < MIN(ZMK_BLE_PROFILE_COUNT, DT_PROP_LEN(UNDERGLOW_INDICATORS, ble_state)); i++) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    uint8_t profile_slots =
+        MIN(cached_ble_profile_count, (uint8_t)DT_PROP_LEN(UNDERGLOW_INDICATORS, ble_state));
+#else
+    uint8_t profile_slots =
+        MIN((uint8_t)ZMK_BLE_PROFILE_COUNT, (uint8_t)DT_PROP_LEN(UNDERGLOW_INDICATORS, ble_state));
+#endif
+
+    for (uint8_t i = 0; i < profile_slots; i++) {
         int8_t status = zmk_cached_ble_profile_status(i);
         int ble_pixel = underglow_ble_state[i];
         if (status == 2 && !usb_output_active && active_ble_profile_index == i) { // connected AND active

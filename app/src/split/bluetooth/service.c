@@ -45,6 +45,12 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define UNDERGLOW_INDICATORS DT_PATH(underglow_indicators)
 #endif
 
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, ble_state)
+#define ZMK_SPLIT_BLE_STATUS_CACHE_SIZE DT_PROP_LEN(UNDERGLOW_INDICATORS, ble_state)
+#else
+#define ZMK_SPLIT_BLE_STATUS_CACHE_SIZE 0
+#endif
+
 #if ZMK_KEYMAP_HAS_SENSORS
 static struct sensor_event last_sensor_event;
 
@@ -115,6 +121,7 @@ static ssize_t split_svc_update_indicators(struct bt_conn *conn, const struct bt
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
 static struct zmk_split_central_usb_status_payload usb_status_cache;
 static struct zmk_split_central_ble_status_payload ble_status_cache;
+static uint8_t ble_profile_states_cache[MAX(1, ZMK_SPLIT_BLE_STATUS_CACHE_SIZE)];
 static bool usb_status_cache_valid;
 static bool ble_status_cache_valid;
 #if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
@@ -129,9 +136,10 @@ static void split_svc_update_usb_status_callback(struct k_work *work) {
 static K_WORK_DEFINE(split_svc_update_usb_status_work, split_svc_update_usb_status_callback);
 
 static void split_svc_update_ble_status_callback(struct k_work *work) {
-    zmk_rgb_underglow_set_cached_ble_status(ble_status_cache.active_ble_profile,
-                                            ble_status_cache.ble_profile_states,
-                                            ARRAY_SIZE(ble_status_cache.ble_profile_states));
+    zmk_rgb_underglow_set_cached_ble_status(
+        ble_status_cache.active_ble_profile,
+        ble_status_cache.profile_count,
+        ble_profile_states_cache, ble_status_cache.profile_count);
 }
 static K_WORK_DEFINE(split_svc_update_ble_status_work, split_svc_update_ble_status_callback);
 
@@ -162,13 +170,32 @@ static ssize_t split_svc_update_ble_status(struct bt_conn *conn, const struct bt
                                            const void *buf, uint16_t len, uint16_t offset,
                                            uint8_t flags) {
     ARG_UNUSED(conn); ARG_UNUSED(attr); ARG_UNUSED(flags);
-    if (offset != 0 || len != sizeof(ble_status_cache)) {
+    if (offset != 0 || len < sizeof(struct zmk_split_central_ble_status_payload)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
-    if (ble_status_cache_valid && memcmp(&ble_status_cache, buf, sizeof(ble_status_cache)) == 0) {
+
+    const struct zmk_split_central_ble_status_payload *payload = buf;
+    const uint8_t *states =
+        ((const uint8_t *)buf) + sizeof(struct zmk_split_central_ble_status_payload);
+    size_t states_len = len - sizeof(struct zmk_split_central_ble_status_payload);
+    size_t clamped_len = MIN((size_t)payload->profile_count, states_len);
+    clamped_len = MIN(clamped_len, (size_t)ZMK_SPLIT_BLE_STATUS_CACHE_SIZE);
+
+    if (ble_status_cache_valid &&
+        ble_status_cache.active_ble_profile == payload->active_ble_profile &&
+        ble_status_cache.profile_count == clamped_len &&
+        memcmp(ble_profile_states_cache, states, clamped_len) == 0) {
         return len;
     }
-    memcpy(&ble_status_cache, buf, sizeof(ble_status_cache));
+
+    ble_status_cache.active_ble_profile = payload->active_ble_profile;
+    ble_status_cache.profile_count = (uint8_t)clamped_len;
+
+    memset(ble_profile_states_cache, 0, sizeof(ble_profile_states_cache));
+    if (clamped_len > 0) {
+        memcpy(ble_profile_states_cache, states, clamped_len);
+    }
+
     ble_status_cache_valid = true;
     k_work_submit(&split_svc_update_ble_status_work);
     return len;

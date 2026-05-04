@@ -37,6 +37,7 @@ int zmk_rgb_underglow_status(void);
 /* GLOVE80_DONGLE: Peripheral cache update hooks for split-delivered status. */
 void zmk_rgb_underglow_set_cached_hid_indicators(zmk_hid_indicators_t indicators);
 void zmk_rgb_underglow_set_cached_ble_status(uint8_t active_ble_profile,
+                                             uint8_t profile_count,
                                              const uint8_t *ble_profile_states,
                                              size_t ble_profile_states_len);
 void zmk_rgb_underglow_set_cached_usb_status(enum zmk_usb_conn_state central_usb_state,
