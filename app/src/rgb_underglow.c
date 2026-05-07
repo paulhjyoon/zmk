@@ -582,20 +582,27 @@ static int zmk_led_generate_status(void) {
 #if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, usb_state)
     enum zmk_usb_conn_state usb_state = zmk_usb_get_conn_state();
 #if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    if (usb_state == ZMK_USB_CONN_HID) { // connected (local peripheral USB only)
-        status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = white;
+    /* Peripheral USB is never used for HID input (CONFIG_ZMK_USB=n).
+     * Show: dull_green when enumerated, red when powered, lilac when disconnected.
+     */
+    if (usb_state == ZMK_USB_CONN_HID) { // connected (enumerated)
+        status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = dull_green;
     } else if (usb_state == ZMK_USB_CONN_POWERED) { // powered
+        status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = red;
+    } else if (usb_state == ZMK_USB_CONN_NONE) { // disconnected
+        status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = lilac;
+    }
 #else
     if (usb_state == ZMK_USB_CONN_HID && usb_output_active) { // connected AND active
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = white;
     } else if (usb_state == ZMK_USB_CONN_HID) { // connected
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = dull_green;
     } else if (usb_state == ZMK_USB_CONN_POWERED) { // powered
-#endif
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = red;
     } else if (usb_state == ZMK_USB_CONN_NONE) { // disconnected
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = lilac;
     }
+#endif
 #endif
 
     int16_t blend = 256;

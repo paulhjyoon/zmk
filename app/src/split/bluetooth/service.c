@@ -178,7 +178,16 @@ static ssize_t split_svc_update_ble_status(struct bt_conn *conn, const struct bt
     const uint8_t *states =
         ((const uint8_t *)buf) + sizeof(struct zmk_split_central_ble_status_payload);
     size_t states_len = len - sizeof(struct zmk_split_central_ble_status_payload);
-    size_t clamped_len = MIN((size_t)payload->profile_count, states_len);
+
+    /* Strict protocol validation:
+     * payload must be exactly [header + profile_count state bytes].
+     * Reject malformed frames (truncated or trailing bytes).
+     */
+    if (states_len != payload->profile_count) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    size_t clamped_len = states_len;
     clamped_len = MIN(clamped_len, (size_t)ZMK_SPLIT_BLE_STATUS_CACHE_SIZE);
 
     if (ble_status_cache_valid &&

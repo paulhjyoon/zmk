@@ -14,6 +14,7 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/atomic.h>
 #include <string.h>
 
 #include <zephyr/logging/log.h>
@@ -172,12 +173,11 @@ static bool is_scanning = false;
 
 static const struct bt_uuid_128 split_service_uuid = BT_UUID_INIT_128(ZMK_SPLIT_BT_SERVICE_UUID);
 
-#define CENTRAL_STATUS_COALESCE_MS 30
 #define CENTRAL_STATUS_DIRTY_USB BIT(0)
 #define CENTRAL_STATUS_DIRTY_BLE BIT(1)
 #define CENTRAL_STATUS_DIRTY_LAYER BIT(2)
 
-static uint8_t central_status_dirty_flags;
+static atomic_t central_status_dirty_flags;
 
 static void central_status_broadcast_work_cb(struct k_work *work);
 K_WORK_DELAYABLE_DEFINE(central_status_broadcast_work, central_status_broadcast_work_cb);
@@ -322,15 +322,14 @@ static void broadcast_central_ble_status(void) {
 }
 
 static void schedule_central_status_broadcast(uint8_t flags) {
-    central_status_dirty_flags |= flags;
-    (void)k_work_reschedule(&central_status_broadcast_work, K_MSEC(CENTRAL_STATUS_COALESCE_MS));
+    atomic_or(&central_status_dirty_flags, (atomic_val_t)flags);
+    (void)k_work_reschedule(&central_status_broadcast_work, K_MSEC(CONFIG_ZMK_SPLIT_BLE_CENTRAL_STATUS_COALESCE_MS));
 }
 
 static void central_status_broadcast_work_cb(struct k_work *work) {
     ARG_UNUSED(work);
 
-    uint8_t flags = central_status_dirty_flags;
-    central_status_dirty_flags = 0;
+    uint8_t flags = (uint8_t)atomic_clear(&central_status_dirty_flags);
 
     if (flags & CENTRAL_STATUS_DIRTY_USB) {
         broadcast_central_usb_status();

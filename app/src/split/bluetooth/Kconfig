@@ -104,4 +104,12 @@ endif # !ZMK_SPLIT_ROLE_CENTRAL
 
 endmenu
 
+config ZMK_SPLIT_BLE_CENTRAL_STATUS_COALESCE_MS
+    int "Central status broadcast coalesce window (ms)"
+    default 30
+    depends on ZMK_SPLIT_ROLE_CENTRAL
+    help
+      Time window (in milliseconds) to coalesce underglow indicator state updates
+      (USB, BLE profile, layer status) before broadcasting to peripherals.
+
 endif # ZMK_SPLIT_BLE
