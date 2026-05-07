@@ -164,7 +164,7 @@ static int set_report_cb(const struct device *dev, struct usb_setup_packet *setu
             struct zmk_endpoint_instance endpoint = {
                 .transport = ZMK_TRANSPORT_USB,
             };
-            zmk_hid_indicators_process_report(&body, endpoint);
+            queue_led_report_processing(&body, endpoint);
             break;
 #endif // IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
         default:
@@ -180,6 +180,40 @@ static int set_report_cb(const struct device *dev, struct usb_setup_packet *setu
 
     return 0;
 }
+
+/* LED report processing deferred to work queue to avoid blocking keyboard sends */
+#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
+struct led_report_work_item {
+    struct k_work work;
+    zmk_hid_indicators_t indicators;
+    struct zmk_endpoint_instance endpoint;
+};
+
+static void process_led_report_work(struct k_work *work) {
+    struct led_report_work_item *item = 
+        CONTAINER_OF(work, struct led_report_work_item, work);
+    
+    zmk_hid_indicators_process_report(&item->indicators, item->endpoint);
+    
+    k_free(item);
+}
+
+static void queue_led_report_processing(zmk_hid_indicators_t *indicators, 
+                                       struct zmk_endpoint_instance endpoint) {
+    struct led_report_work_item *item = k_malloc(sizeof(*item));
+    if (!item) {
+        LOG_WRN("Failed to allocate LED report work item, processing synchronously");
+        zmk_hid_indicators_process_report(indicators, endpoint);
+        return;
+    }
+    
+    k_work_init(&item->work, process_led_report_work);
+    item->indicators = *indicators;
+    item->endpoint = endpoint;
+    
+    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &item->work);
+}
+#endif // IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 
 static const struct hid_ops ops = {
 #if IS_ENABLED(CONFIG_ZMK_USB_BOOT)
@@ -200,10 +234,16 @@ static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
     case USB_DC_UNKNOWN:
         return -ENODEV;
     default:
-        k_sem_take(&hid_sem, K_MSEC(30));
+        int sem_err = k_sem_take(&hid_sem, K_MSEC(30));
+        if (sem_err) {
+            LOG_WRN("USB HID endpoint busy, dropping report (timeout)");
+            return -EBUSY;
+        }
+
         int err = hid_int_ep_write(hid_dev, report, len, NULL);
 
         if (err) {
+            LOG_WRN("USB HID write failed: %d, releasing semaphore", err);
             k_sem_give(&hid_sem);
         }
 
