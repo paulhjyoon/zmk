@@ -53,13 +53,16 @@
     underglow_indicators: underglow-indicators {
         compatible  = "zmk,underglow-indicators";
         layer-state = <35 29 23 17 11 6>;
-        bat-lhs     = <36 30 24 18 12 7>;
-        bat-rhs     = <37 31 25 19 13 8>;
+        /* Renamed from bat-lhs to bat-local for dongle-central semantics clarity. */
+        bat-local   = <36 30 24 18 12 7>;
+        /* bat-rhs removed: each half displays only its own battery level to avoid
+         * cross-peripheral battery fetch overhead in battery-efficiency-first setups. */
         capslock    = <22>;
         numlock     = <16>;
         scrolllock  = <10>;
         ble-state   = <3 4 0 1>;
-        usb-state   = <5>;
+        usb-state   = <2>;
+        central-usb = <5>;
         output-fallback = <15>;
     };
 

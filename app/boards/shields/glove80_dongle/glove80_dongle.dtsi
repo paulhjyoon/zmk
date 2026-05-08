@@ -19,7 +19,6 @@
 		zmk,underglow = &led_strip;
         zmk,backlight = &back_led_backlight;
 		/*zmk,battery   = &vbatt; */
-		zmk,underglow-indicators = &underglow_indicators;
 	};
 
 	default_transform: keymap_transform_0 {
@@ -41,20 +40,6 @@ RC(5,0) RC(5,1) RC(5,2) RC(5,3) RC(5,4)         RC(3,6) RC(4,6) RC(5,6)   RC(5,7
 		pwm_led_0 {
 			pwms = <&pwm0 0 1000000 0>;
 		};
-	};
-	underglow_indicators: underglow-indicators {
-		compatible  = "zmk,underglow-indicators";
-		layer-state = <35 29 23 17 11 6>;
-		/* Renamed from bat-lhs to bat-local for clarity in dongle-central topology */
-		bat-local   = <36 30 24 18 12 7>;
-		/* bat-rhs removed: each half displays only its own battery level on its own LEDs.
-		 * Removed to avoid peripheral battery fetching (battery efficiency priority). */
-		capslock    = <22>;
-		numlock     = <16>;
-		scrolllock  = <10>;
-		ble-state   = <3 4 0 1>;
-		usb-state   = <5>;
-		output-fallback = <15>;
 	};
 };
 

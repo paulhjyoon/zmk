@@ -18,6 +18,7 @@
         zmk,underglow = &led_strip;
         zmk,backlight = &back_led_backlight;
         zmk,battery   = &vbatt;
+        zmk,underglow-indicators = &underglow_indicators;
     };
 
     back_led_backlight: pwmleds {
@@ -36,6 +37,13 @@
 
     vbatt: vbatt {
         compatible = "zmk,battery-nrf-vddh";
+    };
+
+    underglow_indicators: underglow-indicators {
+        compatible  = "zmk,underglow-indicators";
+        /* Renamed from bat-lhs to bat-local for dongle-central semantics clarity. */
+        bat-local   = <36 30 24 18 12 7>;
+        usb-state   = <2>;
     };
 
     glove80_ext: connector {

@@ -1374,24 +1374,27 @@ K_WORK_DEFINE(split_central_split_run_work, split_central_split_run_callback);
 static int split_bt_invoke_behavior_payload(struct central_cmd_wrapper payload_wrapper) {
     LOG_DBG("");
 
-    int err = k_msgq_put(&zmk_split_central_split_run_msgq, &payload_wrapper, K_MSEC(100));
-    if (err) {
-        switch (err) {
-        case -EAGAIN: {
+    while (true) {
+        int err = k_msgq_put(&zmk_split_central_split_run_msgq, &payload_wrapper, K_MSEC(100));
+        if (!err) {
+            k_work_submit_to_queue(&split_central_split_run_q, &split_central_split_run_work);
+            return 0;
+        }
+
+        if (err == -EAGAIN) {
             LOG_WRN("Run command message queue full, popping first message and queueing again");
             struct central_cmd_wrapper discarded_report;
-            k_msgq_get(&zmk_split_central_split_run_msgq, &discarded_report, K_NO_WAIT);
-            return split_bt_invoke_behavior_payload(payload_wrapper);
+            int get_err = k_msgq_get(&zmk_split_central_split_run_msgq, &discarded_report, K_NO_WAIT);
+            if (get_err) {
+                LOG_WRN("Queue reported full but no message was available to discard (%d)", get_err);
+                return err;
+            }
+            continue;
         }
-        default:
-            LOG_WRN("Failed to queue behavior to send (%d)", err);
-            return err;
-        }
+
+        LOG_WRN("Failed to queue behavior to send (%d)", err);
+        return err;
     }
-
-    k_work_submit_to_queue(&split_central_split_run_q, &split_central_split_run_work);
-
-    return 0;
 };
 
 static int finish_init();

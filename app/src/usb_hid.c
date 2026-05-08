@@ -195,16 +195,15 @@ static int set_report_cb(const struct device *dev, struct usb_setup_packet *setu
 }
 
 /* LED report processing deferred to work queue to avoid blocking keyboard sends.
- * Uses a statically allocated message queue to avoid heap dependency (k_malloc).
- * Depth of 4 is sufficient since LED indicator reports arrive rarely and are
- * idempotent; if the queue is full the report falls back to synchronous processing. */
+ * LED queue depth 8 reduces rare queue-full fallback events with very small RAM cost.
+ * Reports are idempotent; if the queue is full the report is processed synchronously. */
 #if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 struct led_report_msg {
     struct zmk_hid_led_report_body body;
     struct zmk_endpoint_instance endpoint;
 };
 
-K_MSGQ_DEFINE(led_report_msgq, sizeof(struct led_report_msg), 4, 4);
+K_MSGQ_DEFINE(led_report_msgq, sizeof(struct led_report_msg), 8, 4);
 
 static void process_led_report_work(struct k_work *work) {
     struct led_report_msg msg;
