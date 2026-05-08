@@ -45,8 +45,10 @@ RC(5,0) RC(5,1) RC(5,2) RC(5,3) RC(5,4)         RC(3,6) RC(4,6) RC(5,6)   RC(5,7
 	underglow_indicators: underglow-indicators {
 		compatible  = "zmk,underglow-indicators";
 		layer-state = <35 29 23 17 11 6>;
-		bat-lhs     = <36 30 24 18 12 7>;
-		bat-rhs     = <37 31 25 19 13 8>;
+		/* Renamed from bat-lhs to bat-local for clarity in dongle-central topology */
+		bat-local   = <36 30 24 18 12 7>;
+		/* bat-rhs removed: each half displays only its own battery level on its own LEDs.
+		 * Removed to avoid peripheral battery fetching (battery efficiency priority). */
 		capslock    = <22>;
 		numlock     = <16>;
 		scrolllock  = <10>;

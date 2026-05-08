@@ -194,37 +194,37 @@ static int set_report_cb(const struct device *dev, struct usb_setup_packet *setu
     return 0;
 }
 
-/* LED report processing deferred to work queue to avoid blocking keyboard sends */
+/* LED report processing deferred to work queue to avoid blocking keyboard sends.
+ * Uses a statically allocated message queue to avoid heap dependency (k_malloc).
+ * Depth of 4 is sufficient since LED indicator reports arrive rarely and are
+ * idempotent; if the queue is full the report falls back to synchronous processing. */
 #if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
-struct led_report_work_item {
-    struct k_work work;
+struct led_report_msg {
     struct zmk_hid_led_report_body body;
     struct zmk_endpoint_instance endpoint;
 };
 
+K_MSGQ_DEFINE(led_report_msgq, sizeof(struct led_report_msg), 4, 4);
+
 static void process_led_report_work(struct k_work *work) {
-    struct led_report_work_item *item =
-        CONTAINER_OF(work, struct led_report_work_item, work);
-
-    zmk_hid_indicators_process_report(&item->body, item->endpoint);
-
-    k_free(item);
+    struct led_report_msg msg;
+    while (k_msgq_get(&led_report_msgq, &msg, K_NO_WAIT) == 0) {
+        zmk_hid_indicators_process_report(&msg.body, msg.endpoint);
+    }
 }
+
+K_WORK_DEFINE(led_report_work, process_led_report_work);
 
 static void queue_led_report_processing(struct zmk_hid_led_report_body *body,
                                         struct zmk_endpoint_instance endpoint) {
-    struct led_report_work_item *item = k_malloc(sizeof(*item));
-    if (!item) {
-        LOG_WRN("Failed to allocate LED report work item, processing synchronously");
+    struct led_report_msg msg = {.body = *body, .endpoint = endpoint};
+    int rc = k_msgq_put(&led_report_msgq, &msg, K_NO_WAIT);
+    if (rc != 0) {
+        LOG_WRN("LED report queue full, processing synchronously");
         zmk_hid_indicators_process_report(body, endpoint);
         return;
     }
-
-    k_work_init(&item->work, process_led_report_work);
-    item->body = *body;
-    item->endpoint = endpoint;
-
-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &item->work);
+    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &led_report_work);
 }
 #endif // IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 

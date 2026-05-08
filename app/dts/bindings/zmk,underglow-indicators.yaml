@@ -7,12 +7,45 @@ compatible: "zmk,underglow-indicators"
 
 # GLOVE80_DONGLE: Optional indicator for most properties and add new dongle-central USB output state.
 properties:
+  bat-local:
+    type: array
+    required: false
+    description: >
+      LED indices indicating local device battery level.
+      Each peripheral displays only its own battery level (not cross-peripheral battery).
+      This design decision prioritizes battery efficiency: fetching a remote peripheral's battery
+      level would require active BLE queries, conflicting with the battery-efficiency-first model.
+      Each Glove80 half has its own underglow LEDs and independently displays its own battery status.
+      Preferred name for new configurations (replaces deprecated 'bat-lhs').
+  bat-left:
+    type: array
+    required: false
+    description: >
+      LED indices indicating left peripheral battery level (Glove80-specific topology).
+      Only displayed on Glove80 central (dongle); not used on left peripheral itself.
+  bat-right:
+    type: array
+    required: false
+    description: >
+      LED indices indicating right peripheral battery level (Glove80-specific topology).
+      Only displayed on Glove80 central (dongle); not used on right peripheral itself.
   bat-lhs:
     type: array
-    required: true
+    required: false
+    deprecated: true
+    description: >
+      Deprecated: Use 'bat-local' instead.
+      Legacy property from left-central era. Renamed for clarity in dongle-central topology.
+      Maintained for backwards compatibility; new boards should use 'bat-local'.
   bat-rhs:
     type: array
     required: false
+    deprecated: true
+    description: >
+      Deprecated: Removed in dongle-central topology.
+      Remote peripheral battery levels are not displayed to avoid BLE fetch overhead.
+      Each half displays only its own battery level on its own LEDs.
+      Maintained only for legacy left-central boards; new boards should not use this property.
   capslock:
     type: int
     required: false

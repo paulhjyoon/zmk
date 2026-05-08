@@ -424,19 +424,29 @@ static void zmk_led_write_pixels(void) {
 static int zmk_led_generate_status(void) { return 0; }
 #else
 
-/* GLOVE80_DONGLE: Always keep bat_lhs enabled */
-const uint8_t underglow_bat_lhs[] = DT_PROP(UNDERGLOW_INDICATORS, bat_lhs);
+/* GLOVE80_DONGLE: Battery display uses new 'bat-local' property (renamed from deprecated 'bat-lhs' for dongle-central clarity) */
+const uint8_t underglow_bat_local[] = DT_PROP_OR(UNDERGLOW_INDICATORS, bat_local,
+                                                DT_PROP(UNDERGLOW_INDICATORS, bat_lhs));
 
-/* GLOVE80_DONGLE: LHS-only DT properties. */
+/* Select property length based on which is available for backwards compatibility */
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, bat_local)
+#define UNDERGLOW_BAT_LEN DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_local)
+#else
+#define UNDERGLOW_BAT_LEN DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_lhs)
+#endif
+
+/* GLOVE80_DONGLE: Local device indicator properties (not RHS-specific in dongle-central topology) */
 #if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
 const uint8_t underglow_layer_state[] = DT_PROP(UNDERGLOW_INDICATORS, layer_state);
 #endif
 #if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, ble_state)
 const uint8_t underglow_ble_state[] = DT_PROP(UNDERGLOW_INDICATORS, ble_state);
 #endif
-#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, bat_rhs)
-const uint8_t underglow_bat_rhs[] = DT_PROP(UNDERGLOW_INDICATORS, bat_rhs);
-#endif
+/* GLOVE80_DONGLE: Removed underglow_bat_rhs declaration.
+ * Design decision: Each half displays only its own battery level on its own LEDs.
+ * Remote battery fetching contradicts battery-efficiency-first model and would require
+ * active BLE queries on peripherals. For Glove80 early versions with LEDs only on LH,
+ * battery level for only the LH is displayed. */
 
 #define HEXRGB(R, G, B)                                                                            \
     ((struct led_rgb){                                                                             \
@@ -473,12 +483,6 @@ static void zmk_led_battery_level(int bat_level, const uint8_t *addresses, size_
     }
 }
 
-static void zmk_led_fill(struct led_rgb color, const uint8_t *addresses, size_t addresses_len) {
-    for (int i = 0; i < addresses_len; i++) {
-        status_pixels[addresses[i]] = color;
-    }
-}
-
 #define ZMK_LED_NUMLOCK_BIT BIT(0)
 #define ZMK_LED_CAPSLOCK_BIT BIT(1)
 #define ZMK_LED_SCROLLLOCK_BIT BIT(2)
@@ -490,8 +494,8 @@ static int zmk_led_generate_status(void) {
 
     // BATTERY STATUS
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    zmk_led_battery_level(zmk_battery_state_of_charge(), underglow_bat_lhs,
-                          DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_lhs));
+    /* Display local device battery using bat-local property (with fallback to deprecated bat-lhs) */
+    zmk_led_battery_level(zmk_battery_state_of_charge(), underglow_bat_local, UNDERGLOW_BAT_LEN);
 #endif // CONFIG_ZMK_BATTERY_REPORTING
 
 #if !defined(CONFIG_BOARD_GLOVE80_RH)
