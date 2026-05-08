@@ -32,10 +32,6 @@
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/workqueue.h>
 
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
-#include <zmk/split/central.h>
-#endif
-
 #include <zmk/split/bluetooth/service.h>
 #include <stdint.h>
 #include <string.h>
@@ -230,6 +226,10 @@ static struct led_rgb status_pixels[STRIP_NUM_PIXELS];
 
 static struct rgb_underglow_state state;
 
+static inline bool zmk_rgb_underglow_should_render_local(void) {
+    return !(IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL));
+}
+
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER)
 static const struct device *const ext_power = DEVICE_DT_GET(DT_INST(0, zmk_ext_power_generic));
 #endif
@@ -344,6 +344,10 @@ static void zmk_rgb_underglow_effect_swirl(void) {
 static int zmk_led_generate_status(void);
 
 static void zmk_led_write_pixels(void) {
+    if (!zmk_rgb_underglow_should_render_local()) {
+        return;
+    }
+
     static struct led_rgb led_buffer[STRIP_NUM_PIXELS];
     int bat0;
     int blend = 0;
@@ -488,21 +492,6 @@ static int zmk_led_generate_status(void) {
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     zmk_led_battery_level(zmk_battery_state_of_charge(), underglow_bat_lhs,
                           DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_lhs));
-/* GLOVE80_DONGLE: Guard RHS and optional bat_rhs for peripheral battery indicator. */
-#if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING) &&                             \
-    !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, bat_rhs)
-    uint8_t peripheral_level = 0;
-    int rc = zmk_split_central_get_peripheral_battery_level(0, &peripheral_level);
-
-    if (rc == 0) {
-        zmk_led_battery_level(peripheral_level, underglow_bat_rhs,
-                              DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_rhs));
-    } else if (rc == -ENODEV || rc == -ENOTCONN) {
-        zmk_led_fill(red, underglow_bat_rhs, DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_rhs));
-    } else if (rc == -EINVAL) {
-        LOG_ERR("Invalid peripheral index requested for battery level read: 0");
-    }
-#endif // CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING && !RHS && bat_rhs
 #endif // CONFIG_ZMK_BATTERY_REPORTING
 
 #if !defined(CONFIG_BOARD_GLOVE80_RH)
@@ -713,7 +702,7 @@ static int zmk_rgb_underglow_init(void) {
     state.on = zmk_usb_is_powered();
 #endif
 
-    if (state.on) {
+    if (state.on && zmk_rgb_underglow_should_render_local()) {
         k_timer_start(&underglow_tick, K_NO_WAIT, K_MSEC(25));
     }
 
@@ -779,7 +768,9 @@ int zmk_rgb_underglow_on(void) {
     zmk_rgb_set_ext_power();
 
     state.animation_step = 0;
-    k_timer_start(&underglow_tick, K_NO_WAIT, K_MSEC(25));
+    if (zmk_rgb_underglow_should_render_local()) {
+        k_timer_start(&underglow_tick, K_NO_WAIT, K_MSEC(25));
+    }
 
     return zmk_rgb_underglow_save_state();
 }
@@ -798,7 +789,9 @@ int zmk_rgb_underglow_off(void) {
     if (!led_strip)
         return -ENODEV;
 
-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &underglow_off_work);
+    if (zmk_rgb_underglow_should_render_local()) {
+        k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &underglow_off_work);
+    }
 
     k_timer_stop(&underglow_tick);
     state.on = false;
@@ -860,6 +853,11 @@ static void zmk_led_write_pixels_work(struct k_work *work) {
 }
 
 int zmk_rgb_underglow_status(void) {
+    if (!zmk_rgb_underglow_should_render_local()) {
+        state.status_active = false;
+        return 0;
+    }
+
     if (!state.status_active) {
         state.status_animation_step = 0;
     } else {

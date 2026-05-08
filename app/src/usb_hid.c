@@ -13,6 +13,7 @@
 #include <zmk/usb.h>
 #include <zmk/hid.h>
 #include <zmk/keymap.h>
+#include <zephyr/kernel.h>
 
 #if IS_ENABLED(CONFIG_ZMK_POINTING_SMOOTH_SCROLLING)
 #include <zmk/pointing/resolution_multipliers.h>
@@ -23,14 +24,20 @@
 #endif // IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 
 #include <zmk/event_manager.h>
+#include <zmk/workqueue.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 static const struct device *hid_dev;
 
 static K_SEM_DEFINE(hid_sem, 1, 1);
+static atomic_t hid_sem_stuck_attempts = 0;
+#define HID_SEM_STUCK_THRESHOLD 5  /* If sem stays held 5+ times in quick succession, force reset */
 
-static void in_ready_cb(const struct device *dev) { k_sem_give(&hid_sem); }
+static void in_ready_cb(const struct device *dev) { 
+    k_sem_give(&hid_sem);
+    atomic_set(&hid_sem_stuck_attempts, 0);  /* Reset stuck counter on successful callback */
+}
 
 #define HID_GET_REPORT_TYPE_MASK 0xff00
 #define HID_GET_REPORT_ID_MASK 0x00ff
@@ -119,6 +126,12 @@ static int get_report_cb(const struct device *dev, struct usb_setup_packet *setu
     return 0;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
+/* Forward declaration — defined after set_report_cb */
+static void queue_led_report_processing(struct zmk_hid_led_report_body *body,
+                                        struct zmk_endpoint_instance endpoint);
+#endif // IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
+
 static int set_report_cb(const struct device *dev, struct usb_setup_packet *setup, int32_t *len,
                          uint8_t **data) {
     switch (setup->wValue & HID_GET_REPORT_TYPE_MASK) {
@@ -185,32 +198,32 @@ static int set_report_cb(const struct device *dev, struct usb_setup_packet *setu
 #if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
 struct led_report_work_item {
     struct k_work work;
-    zmk_hid_indicators_t indicators;
+    struct zmk_hid_led_report_body body;
     struct zmk_endpoint_instance endpoint;
 };
 
 static void process_led_report_work(struct k_work *work) {
-    struct led_report_work_item *item = 
+    struct led_report_work_item *item =
         CONTAINER_OF(work, struct led_report_work_item, work);
-    
-    zmk_hid_indicators_process_report(&item->indicators, item->endpoint);
-    
+
+    zmk_hid_indicators_process_report(&item->body, item->endpoint);
+
     k_free(item);
 }
 
-static void queue_led_report_processing(zmk_hid_indicators_t *indicators, 
-                                       struct zmk_endpoint_instance endpoint) {
+static void queue_led_report_processing(struct zmk_hid_led_report_body *body,
+                                        struct zmk_endpoint_instance endpoint) {
     struct led_report_work_item *item = k_malloc(sizeof(*item));
     if (!item) {
         LOG_WRN("Failed to allocate LED report work item, processing synchronously");
-        zmk_hid_indicators_process_report(indicators, endpoint);
+        zmk_hid_indicators_process_report(body, endpoint);
         return;
     }
-    
+
     k_work_init(&item->work, process_led_report_work);
-    item->indicators = *indicators;
+    item->body = *body;
     item->endpoint = endpoint;
-    
+
     k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &item->work);
 }
 #endif // IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
@@ -234,9 +247,19 @@ static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
     case USB_DC_UNKNOWN:
         return -ENODEV;
     default:
-        int sem_err = k_sem_take(&hid_sem, K_MSEC(30));
+        /* Use a longer timeout (100ms) instead of 30ms to allow more time for the endpoint.
+         * If still busy after 100ms, we track stuck attempts to detect deadlock. */
+        int sem_err = k_sem_take(&hid_sem, K_MSEC(100));
         if (sem_err) {
-            LOG_WRN("USB HID endpoint busy, dropping report (timeout)");
+            int attempts = atomic_inc(&hid_sem_stuck_attempts);
+            if (attempts >= HID_SEM_STUCK_THRESHOLD) {
+                LOG_ERR("USB HID endpoint appears stuck (timeout threshold reached). Forcing reset.");
+                atomic_set(&hid_sem_stuck_attempts, 0);
+                k_sem_give(&hid_sem);  /* Force release to unblock */
+                return -EBUSY;
+            }
+            LOG_WRN("USB HID endpoint busy, dropping report (timeout - attempt %d/%d)", 
+                    attempts, HID_SEM_STUCK_THRESHOLD);
             return -EBUSY;
         }
 
@@ -245,7 +268,9 @@ static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
         if (err) {
             LOG_WRN("USB HID write failed: %d, releasing semaphore", err);
             k_sem_give(&hid_sem);
+            atomic_set(&hid_sem_stuck_attempts, 0);
         }
+        /* On success, semaphore is held until in_ready_cb releases it */
 
         return err;
     }

@@ -80,6 +80,8 @@ struct peripheral_slot {
 #endif /* IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING) */
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
     uint16_t update_hid_indicators;
+    zmk_hid_indicators_t last_hid_indicators;
+    bool last_hid_indicators_valid;
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
     uint16_t central_usb_status_handle;
@@ -220,8 +222,18 @@ static int send_hid_indicators_to_slot(struct peripheral_slot *slot,
         return -EAGAIN;
     }
 
-    return bt_gatt_write_without_response(slot->conn, slot->update_hid_indicators, &indicators,
-                                          sizeof(indicators), true);
+    if (slot->last_hid_indicators_valid && slot->last_hid_indicators == indicators) {
+        return 0;
+    }
+
+    int err = bt_gatt_write_without_response(slot->conn, slot->update_hid_indicators, &indicators,
+                                             sizeof(indicators), true);
+    if (!err) {
+        slot->last_hid_indicators = indicators;
+        slot->last_hid_indicators_valid = true;
+    }
+
+    return err;
 }
 
 static int send_current_hid_indicators_to_slot(struct peripheral_slot *slot) {
@@ -427,6 +439,7 @@ int release_peripheral_slot(int index) {
     slot->selected_physical_layout_handle = 0;
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
     slot->update_hid_indicators = 0;
+    slot->last_hid_indicators_valid = false;
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
     slot->central_usb_status_handle = 0;

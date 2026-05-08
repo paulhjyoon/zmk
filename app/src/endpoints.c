@@ -119,31 +119,11 @@ int zmk_endpoints_toggle_transport(void) {
 
 struct zmk_endpoint_instance zmk_endpoints_selected(void) { return current_instance; }
 
-#define USB_SEND_RETRY_COUNT 2
-#define USB_SEND_RETRY_DELAY_MS 2
-
-static int send_usb_report_with_retry(int (*send_fn)(void)) {
-    int err = 0;
-
-    for (int attempt = 0; attempt <= USB_SEND_RETRY_COUNT; attempt++) {
-        err = send_fn();
-        if (err != -EBUSY) {
-            return err;
-        }
-
-        if (attempt < USB_SEND_RETRY_COUNT) {
-            k_msleep(USB_SEND_RETRY_DELAY_MS);
-        }
-    }
-
-    return err;
-}
-
 static int send_keyboard_report(void) {
     switch (current_instance.transport) {
     case ZMK_TRANSPORT_USB: {
 #if IS_ENABLED(CONFIG_ZMK_USB)
-        int err = send_usb_report_with_retry(zmk_usb_hid_send_keyboard_report);
+        int err = zmk_usb_hid_send_keyboard_report();
         if (err) {
             LOG_ERR("FAILED TO SEND OVER USB: %d", err);
         }
@@ -177,7 +157,7 @@ static int send_consumer_report(void) {
     switch (current_instance.transport) {
     case ZMK_TRANSPORT_USB: {
 #if IS_ENABLED(CONFIG_ZMK_USB)
-        int err = send_usb_report_with_retry(zmk_usb_hid_send_consumer_report);
+        int err = zmk_usb_hid_send_consumer_report();
         if (err) {
             LOG_ERR("FAILED TO SEND OVER USB: %d", err);
         }
@@ -227,7 +207,7 @@ int zmk_endpoints_send_mouse_report() {
     switch (current_instance.transport) {
     case ZMK_TRANSPORT_USB: {
 #if IS_ENABLED(CONFIG_ZMK_USB)
-        int err = send_usb_report_with_retry(zmk_usb_hid_send_mouse_report);
+        int err = zmk_usb_hid_send_mouse_report();
         if (err) {
             LOG_ERR("FAILED TO SEND OVER USB: %d", err);
         }
