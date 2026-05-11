@@ -13,6 +13,12 @@ config USB_DEVICE_STACK
 
 endif # USB
 
+config ZMK_KSCAN
+	default y
+
+config ZMK_KSCAN_GPIO_DIRECT
+	default y
+
 config BT_CTLR
 	default BT
 

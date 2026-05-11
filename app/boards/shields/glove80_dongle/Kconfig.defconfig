@@ -15,4 +15,10 @@ config ZMK_SPLIT
 config ZMK_SPLIT_ROLE_CENTRAL
 	default y
 
+config ZMK_KSCAN
+	default y
+
+config ZMK_KSCAN_GPIO_DIRECT
+	default y
+
 endif

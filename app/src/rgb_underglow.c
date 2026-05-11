@@ -555,27 +555,29 @@ static int zmk_led_generate_status(void) {
         }
     }
 #endif // CONFIG_ZMK_BLE && ble_state
-#endif // CONFIG_BOARD_GLOVE80_RH
 
 /* GLOVE80_DONGLE: LHS-only indicator for dongle central USB state. */
-#if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, central_usb)
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, central_usb)
     enum zmk_usb_conn_state central_usb_state = zmk_cached_central_usb_state();
     uint8_t central_usb_px = DT_PROP_BY_IDX(UNDERGLOW_INDICATORS, central_usb, 0);
-    if (central_usb_state == ZMK_USB_CONN_HID) { // connected
+    if (central_usb_state == ZMK_USB_CONN_HID && usb_output_active) { // connected AND active
         status_pixels[central_usb_px] = white;
+    } else if (central_usb_state == ZMK_USB_CONN_HID) { // connected
+        status_pixels[central_usb_px] = dull_green;
     } else if (central_usb_state == ZMK_USB_CONN_POWERED) { // powered
         status_pixels[central_usb_px] = red;
     } else if (central_usb_state == ZMK_USB_CONN_NONE) { // disconnected
         status_pixels[central_usb_px] = lilac;
     }
 #endif
+#endif // CONFIG_BOARD_GLOVE80_RH
 
-#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, usb_state)
+/*
+ * Peripheral USB is never used for HID input (CONFIG_ZMK_USB=n).
+ * Show: dull_green when enumerated, red when powered, lilac when disconnected.
+ */
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, usb_state) && IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     enum zmk_usb_conn_state usb_state = zmk_usb_get_conn_state();
-#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-    /* Peripheral USB is never used for HID input (CONFIG_ZMK_USB=n).
-     * Show: dull_green when enumerated, red when powered, lilac when disconnected.
-     */
     if (usb_state == ZMK_USB_CONN_HID) { // connected (enumerated)
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = dull_green;
     } else if (usb_state == ZMK_USB_CONN_POWERED) { // powered
@@ -583,17 +585,6 @@ static int zmk_led_generate_status(void) {
     } else if (usb_state == ZMK_USB_CONN_NONE) { // disconnected
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = lilac;
     }
-#else
-    if (usb_state == ZMK_USB_CONN_HID && usb_output_active) { // connected AND active
-        status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = white;
-    } else if (usb_state == ZMK_USB_CONN_HID) { // connected
-        status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = dull_green;
-    } else if (usb_state == ZMK_USB_CONN_POWERED) { // powered
-        status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = red;
-    } else if (usb_state == ZMK_USB_CONN_NONE) { // disconnected
-        status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = lilac;
-    }
-#endif
 #endif
 
     int16_t blend = 256;
