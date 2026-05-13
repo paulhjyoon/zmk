@@ -1,4 +1,8 @@
 / {
+	chosen {
+		/delete-property/ zmk,backlight;
+	};
+
 	kscan0: kscan {
 		compatible = "zmk,kscan-gpio-direct";
 		label = "DONGLE_KSCAN";
