@@ -7,9 +7,6 @@ CONFIG_BOARD_NRF52840_MDK_USB_DONGLE=y
 # Build UF2 firmware artifact.
 CONFIG_BUILD_OUTPUT_UF2=y
 
-# Follow devicetree code partitioning.
-CONFIG_USE_DT_CODE_PARTITION=y
-
 # Enable MPU
 CONFIG_ARM_MPU=y
 

@@ -6,7 +6,6 @@
 CONFIG_BUILD_OUTPUT_UF2=y
 
 # Match SliceMK-like flash/settings behavior for stable BLE reconnect.
-CONFIG_USE_DT_CODE_PARTITION=y
 CONFIG_MPU_ALLOW_FLASH_WRITE=y
 CONFIG_NVS=y
 CONFIG_SETTINGS_NVS=y
