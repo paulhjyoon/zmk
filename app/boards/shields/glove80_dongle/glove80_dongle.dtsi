@@ -12,10 +12,6 @@
 	chosen {
 		zmk,kscan = &kscan_composite;
 		zmk,matrix-transform = &default_transform;
-		zephyr,code-partition = &code_partition;
-		zephyr,sram = &sram0;
-		zephyr,flash = &flash0;
-		zephyr,console = &cdc_acm_uart;
 		zmk,underglow = &led_strip;
         zmk,backlight = &back_led_backlight;
 		/*zmk,battery   = &vbatt; */
@@ -68,13 +64,6 @@ RC(6,0)
 
 &gpio1 {
 	status = "okay";
-};
-
-&usbd {
-	status = "okay";
-	cdc_acm_uart: cdc_acm_uart {
-		compatible = "zephyr,cdc-acm-uart";
-	};
 };
 
 &pinctrl {
