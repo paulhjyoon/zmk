@@ -363,7 +363,21 @@ static void update_current_endpoint(void) {
 }
 
 static int endpoint_listener(const zmk_event_t *eh) {
+    const struct zmk_usb_conn_state_changed *usb_ev = as_zmk_usb_conn_state_changed(eh);
+
     update_current_endpoint();
+
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    // On fresh USB HID enumeration, proactively push the current (possibly empty)
+    // reports so hosts that defer LED/output report initialization until first IN
+    // traffic can promptly provide HID indicator state.
+    if (usb_ev && usb_ev->conn_state == ZMK_USB_CONN_HID &&
+        current_instance.transport == ZMK_TRANSPORT_USB) {
+        (void)zmk_endpoints_send_report(HID_USAGE_KEY);
+        (void)zmk_endpoints_send_report(HID_USAGE_CONSUMER);
+    }
+#endif
+
     return 0;
 }
 

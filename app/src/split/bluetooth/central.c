@@ -34,7 +34,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/events/layer_state_changed.h>
 #include <zmk/events/endpoint_changed.h>
 #include <zmk/events/ble_active_profile_changed.h>
-    
+
 #if defined(__has_include)
 #if __has_include(<zmk/events/ble_profile_changed.h>)
 #include <zmk/events/ble_profile_changed.h>
@@ -239,6 +239,16 @@ static int send_hid_indicators_to_slot(struct peripheral_slot *slot,
 static int send_current_hid_indicators_to_slot(struct peripheral_slot *slot) {
     return send_hid_indicators_to_slot(slot, zmk_hid_indicators_get_current_profile());
 }
+
+static void sync_current_hid_indicators_to_connected_slots(void) {
+    for (int i = 0; i < ZMK_SPLIT_BLE_PERIPHERAL_COUNT; i++) {
+        if (peripherals[i].state != PERIPHERAL_SLOT_STATE_CONNECTED) {
+            continue;
+        }
+
+        (void)send_current_hid_indicators_to_slot(&peripherals[i]);
+    }
+}
 #endif
 
 static int send_central_ble_status_to_slot(struct peripheral_slot *slot) {
@@ -246,7 +256,8 @@ static int send_central_ble_status_to_slot(struct peripheral_slot *slot) {
     if (!slot->central_ble_status_handle || !slot->conn) {
         return -ENODEV;
     }
-    uint8_t payload[sizeof(struct zmk_split_central_ble_status_payload) + ZMK_BLE_PROFILE_COUNT] = {0};
+    uint8_t payload[sizeof(struct zmk_split_central_ble_status_payload) + ZMK_BLE_PROFILE_COUNT] = {
+        0};
     struct zmk_split_central_ble_status_payload *p =
         (struct zmk_split_central_ble_status_payload *)payload;
 
@@ -291,8 +302,7 @@ static int send_central_layer_status_to_slot(struct peripheral_slot *slot) {
     }
     p.active_layers_mask = mask;
 
-    if (slot->last_layer_status_valid &&
-        memcmp(&slot->last_layer_status, &p, sizeof(p)) == 0) {
+    if (slot->last_layer_status_valid && memcmp(&slot->last_layer_status, &p, sizeof(p)) == 0) {
         return 0;
     }
 
@@ -335,7 +345,8 @@ static void broadcast_central_ble_status(void) {
 
 static void schedule_central_status_broadcast(uint8_t flags) {
     atomic_or(&central_status_dirty_flags, (atomic_val_t)flags);
-    (void)k_work_reschedule(&central_status_broadcast_work, K_MSEC(CONFIG_ZMK_SPLIT_BLE_CENTRAL_STATUS_COALESCE_MS));
+    (void)k_work_reschedule(&central_status_broadcast_work,
+                            K_MSEC(CONFIG_ZMK_SPLIT_BLE_CENTRAL_STATUS_COALESCE_MS));
 }
 
 static void central_status_broadcast_work_cb(struct k_work *work) {
@@ -974,7 +985,14 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
     }
 #endif // IS_ENABLED(CONFIG_ZMK_INPUT_SPLIT)
 
-    return subscribed ? BT_GATT_ITER_STOP : BT_GATT_ITER_CONTINUE;
+    if (subscribed) {
+        // Discovery can complete after the first status notification; re-notify to
+        // trigger a best-effort initial HID indicator sync for newly ready slots.
+        k_work_submit(&notify_status_work);
+        return BT_GATT_ITER_STOP;
+    }
+
+    return BT_GATT_ITER_CONTINUE;
 }
 
 static uint8_t split_central_service_discovery_func(struct bt_conn *conn,
@@ -1257,7 +1275,7 @@ static void split_central_disconnected(struct bt_conn *conn, uint8_t reason) {
 static void split_central_security_changed(struct bt_conn *conn, bt_security_t level,
                                            enum bt_security_err err) {
     struct peripheral_slot *slot = peripheral_slot_for_conn(conn);
-    if (!slot || !slot->selected_physical_layout_handle) {
+    if (!slot) {
         return;
     }
 
@@ -1271,7 +1289,9 @@ static void split_central_security_changed(struct bt_conn *conn, bt_security_t l
         return;
     }
 
-    k_work_submit(&update_peripherals_selected_layouts_work);
+    if (slot->selected_physical_layout_handle) {
+        k_work_submit(&update_peripherals_selected_layouts_work);
+    }
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
     (void)send_current_hid_indicators_to_slot(slot);
@@ -1352,9 +1372,9 @@ void split_central_split_run_callback(struct k_work *work) {
                 payload_wrapper.cmd.data.set_physical_layout.layout_idx);
             break;
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
-        case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_HID_INDICATORS:
-        {
-            zmk_hid_indicators_t indicators = payload_wrapper.cmd.data.set_hid_indicators.indicators;
+        case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_HID_INDICATORS: {
+            zmk_hid_indicators_t indicators =
+                payload_wrapper.cmd.data.set_hid_indicators.indicators;
             int err = send_hid_indicators_to_slot(&peripherals[payload_wrapper.source], indicators);
             if (err) {
                 LOG_ERR("Failed to write HID indicator characteristic (err %d)", err);
@@ -1384,9 +1404,11 @@ static int split_bt_invoke_behavior_payload(struct central_cmd_wrapper payload_w
         if (err == -EAGAIN) {
             LOG_WRN("Run command message queue full, popping first message and queueing again");
             struct central_cmd_wrapper discarded_report;
-            int get_err = k_msgq_get(&zmk_split_central_split_run_msgq, &discarded_report, K_NO_WAIT);
+            int get_err =
+                k_msgq_get(&zmk_split_central_split_run_msgq, &discarded_report, K_NO_WAIT);
             if (get_err) {
-                LOG_WRN("Queue reported full but no message was available to discard (%d)", get_err);
+                LOG_WRN("Queue reported full but no message was available to discard (%d)",
+                        get_err);
                 return err;
             }
             continue;
@@ -1576,6 +1598,10 @@ static const struct zmk_split_transport_central_api central_api = {
 ZMK_SPLIT_TRANSPORT_CENTRAL_REGISTER(bt_central, &central_api, CONFIG_ZMK_SPLIT_BLE_PRIORITY);
 
 static void notify_transport_status(void) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+    sync_current_hid_indicators_to_connected_slots();
+#endif
+
     if (transport_status_cb) {
         transport_status_cb(&bt_central, split_central_bt_get_status());
     }
