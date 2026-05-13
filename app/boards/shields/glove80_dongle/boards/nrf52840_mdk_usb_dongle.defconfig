@@ -1,0 +1,19 @@
+# Kconfig parity overrides for glove80_dongle on nrf52840_mdk_usb_dongle.
+# This file is shield+board specific and is not affected by syncing the board
+# directory from upstream Zephyr.
+
+# Build UF2 artifact for dongle and dongle-reset targets.
+CONFIG_BUILD_OUTPUT_UF2=y
+
+# Match SliceMK-like flash/settings behavior for stable BLE reconnect.
+CONFIG_USE_DT_CODE_PARTITION=y
+CONFIG_MPU_ALLOW_FLASH_WRITE=y
+CONFIG_NVS=y
+CONFIG_SETTINGS_NVS=y
+CONFIG_FLASH=y
+CONFIG_FLASH_PAGE_LAYOUT=y
+CONFIG_FLASH_MAP=y
+
+# Match known-good radio defaults.
+CONFIG_BT_CTLR_TX_PWR_PLUS_8=y
+CONFIG_BT_CTLR_PHY_CODED=n

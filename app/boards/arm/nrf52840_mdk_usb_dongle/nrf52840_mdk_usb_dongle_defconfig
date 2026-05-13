@@ -7,6 +7,9 @@ CONFIG_BOARD_NRF52840_MDK_USB_DONGLE=y
 # Build UF2 firmware artifact.
 CONFIG_BUILD_OUTPUT_UF2=y
 
+# Follow devicetree code partitioning.
+CONFIG_USE_DT_CODE_PARTITION=y
+
 # Enable MPU
 CONFIG_ARM_MPU=y
 
@@ -15,3 +18,15 @@ CONFIG_HW_STACK_PROTECTION=y
 
 # enable GPIO
 CONFIG_GPIO=y
+
+# Persist BLE bonds/settings across power cycles.
+CONFIG_MPU_ALLOW_FLASH_WRITE=y
+CONFIG_NVS=y
+CONFIG_SETTINGS_NVS=y
+CONFIG_FLASH=y
+CONFIG_FLASH_PAGE_LAYOUT=y
+CONFIG_FLASH_MAP=y
+
+# Match known-good radio defaults used by the previous dongle board.
+CONFIG_BT_CTLR_TX_PWR_PLUS_8=y
+CONFIG_BT_CTLR_PHY_CODED=n
