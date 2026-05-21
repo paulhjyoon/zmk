@@ -202,7 +202,14 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #endif
 
 #define STRIP_CHOSEN DT_CHOSEN(zmk_underglow)
+
+/* Handle both SPI LED strips (with chain_length) and PWM LEDs (without) */
+#if DT_NODE_HAS_PROP(STRIP_CHOSEN, chain_length)
 #define STRIP_NUM_PIXELS DT_PROP(STRIP_CHOSEN, chain_length)
+#else
+/* PWM LEDs or similar - no pixel chain, define minimal size */
+#define STRIP_NUM_PIXELS 1
+#endif
 
 #if DT_HAS_COMPAT_STATUS_OKAY(zmk_underglow_layer) && IS_ENABLED(CONFIG_EXPERIMENTAL_RGB_LAYER)
 #define UNDERGLOW_LAYER_ENABLED 1
@@ -462,9 +469,10 @@ static void zmk_led_write_pixels(void) {
 static int zmk_led_generate_status(void) { return 0; }
 #else
 
-/* GLOVE80_DONGLE: Battery display uses new 'bat-local' property (renamed from deprecated 'bat-lhs' for dongle-central clarity) */
-const uint8_t underglow_bat_local[] = DT_PROP_OR(UNDERGLOW_INDICATORS, bat_local,
-                                                DT_PROP(UNDERGLOW_INDICATORS, bat_lhs));
+/* GLOVE80_DONGLE: Battery display uses new 'bat-local' property (renamed from deprecated 'bat-lhs'
+ * for dongle-central clarity) */
+const uint8_t underglow_bat_local[] =
+    DT_PROP_OR(UNDERGLOW_INDICATORS, bat_local, DT_PROP(UNDERGLOW_INDICATORS, bat_lhs));
 
 /* Select property length based on which is available for backwards compatibility */
 #if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, bat_local)
@@ -473,7 +481,8 @@ const uint8_t underglow_bat_local[] = DT_PROP_OR(UNDERGLOW_INDICATORS, bat_local
 #define UNDERGLOW_BAT_LEN DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_lhs)
 #endif
 
-/* GLOVE80_DONGLE: Local device indicator properties (not RHS-specific in dongle-central topology) */
+/* GLOVE80_DONGLE: Local device indicator properties (not RHS-specific in dongle-central topology)
+ */
 #if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
 const uint8_t underglow_layer_state[] = DT_PROP(UNDERGLOW_INDICATORS, layer_state);
 #endif
@@ -532,7 +541,8 @@ static int zmk_led_generate_status(void) {
 
     // BATTERY STATUS
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
-    /* Display local device battery using bat-local property (with fallback to deprecated bat-lhs) */
+    /* Display local device battery using bat-local property (with fallback to deprecated bat-lhs)
+     */
     zmk_led_battery_level(zmk_battery_state_of_charge(), underglow_bat_local, UNDERGLOW_BAT_LEN);
 #endif // CONFIG_ZMK_BATTERY_REPORTING
 
@@ -614,7 +624,8 @@ static int zmk_led_generate_status(void) {
  * Peripheral USB is never used for HID input (CONFIG_ZMK_USB=n).
  * Show: dull_green when enumerated, red when powered, lilac when disconnected.
  */
-#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, usb_state) && IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, usb_state) && IS_ENABLED(CONFIG_ZMK_SPLIT) &&           \
+    !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
     enum zmk_usb_conn_state usb_state = zmk_usb_get_conn_state();
     if (usb_state == ZMK_USB_CONN_HID) { // connected (enumerated)
         status_pixels[DT_PROP(UNDERGLOW_INDICATORS, usb_state)] = dull_green;
@@ -724,7 +735,12 @@ static struct k_work_delayable underglow_save_work;
 #endif
 
 static int zmk_rgb_underglow_init(void) {
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+    /* Central does not render underglow locally; skip device acquisition. */
+    led_strip = NULL;
+#else
     led_strip = DEVICE_DT_GET(STRIP_CHOSEN);
+#endif
 
 #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER)
     if (!device_is_ready(ext_power)) {
@@ -775,7 +791,7 @@ int zmk_rgb_underglow_save_state(void) {
 }
 
 int zmk_rgb_underglow_get_state(bool *on_off) {
-    if (!led_strip)
+    if (zmk_rgb_underglow_should_render_local() && !led_strip)
         return -ENODEV;
 
     *on_off = state.on || state.layer_enabled;
@@ -828,7 +844,7 @@ int zmk_rgb_underglow_on(void) {
 }
 
 int zmk_rgb_underglow_transient_on(void) {
-    if (!led_strip)
+    if (zmk_rgb_underglow_should_render_local() && !led_strip)
         return -ENODEV;
 
     state.on = true;
@@ -858,7 +874,7 @@ int zmk_rgb_underglow_off(void) {
 }
 
 int zmk_rgb_underglow_transient_off(void) {
-    if (!led_strip)
+    if (zmk_rgb_underglow_should_render_local() && !led_strip)
         return -ENODEV;
 
     if (zmk_rgb_underglow_should_render_local()) {
@@ -877,7 +893,7 @@ int zmk_rgb_underglow_calc_effect(int direction) {
 }
 
 int zmk_rgb_underglow_select_effect(int effect) {
-    if (!led_strip)
+    if (zmk_rgb_underglow_should_render_local() && !led_strip)
         return -ENODEV;
 
     if (effect < 0 || effect >= UNDERGLOW_EFFECT_NUMBER) {
@@ -1139,7 +1155,7 @@ struct zmk_led_hsb zmk_rgb_underglow_calc_brt(int direction) {
 }
 
 int zmk_rgb_underglow_change_hue(int direction) {
-    if (!led_strip)
+    if (zmk_rgb_underglow_should_render_local() && !led_strip)
         return -ENODEV;
 
     state.color = zmk_rgb_underglow_calc_hue(direction);
@@ -1148,7 +1164,7 @@ int zmk_rgb_underglow_change_hue(int direction) {
 }
 
 int zmk_rgb_underglow_change_sat(int direction) {
-    if (!led_strip)
+    if (zmk_rgb_underglow_should_render_local() && !led_strip)
         return -ENODEV;
 
     state.color = zmk_rgb_underglow_calc_sat(direction);
@@ -1157,7 +1173,7 @@ int zmk_rgb_underglow_change_sat(int direction) {
 }
 
 int zmk_rgb_underglow_change_brt(int direction) {
-    if (!led_strip)
+    if (zmk_rgb_underglow_should_render_local() && !led_strip)
         return -ENODEV;
 
     state.color = zmk_rgb_underglow_calc_brt(direction);
@@ -1166,7 +1182,7 @@ int zmk_rgb_underglow_change_brt(int direction) {
 }
 
 int zmk_rgb_underglow_change_spd(int direction) {
-    if (!led_strip)
+    if (zmk_rgb_underglow_should_render_local() && !led_strip)
         return -ENODEV;
 
     if (state.animation_speed == 1 && direction < 0) {

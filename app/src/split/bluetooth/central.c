@@ -896,7 +896,6 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
                 (void)send_central_layer_status_to_slot(slot);
             }
 #endif /* IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) */
-#endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
         } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
                                 BT_UUID_DECLARE_128(ZMK_SPLIT_BT_UPDATE_LAYERS_UUID))) {
             LOG_DBG("Found update Layers handle");
@@ -1394,17 +1393,24 @@ void split_central_split_run_callback(struct k_work *work) {
             break;
         }
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
-        case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_RGB_LAYERS:
-            err = bt_gatt_write_without_response(
-                peripherals[payload_wrapper.source].conn,
-                peripherals[payload_wrapper.source].update_layers_handle,
-                &payload_wrapper.cmd.data.set_rgb_layers.layers,
-                sizeof(payload_wrapper.cmd.data.set_rgb_layers.layers), true);
-
-            if (err) {
-                LOG_ERR("Failed to send layers to peripheral (err %d)", err);
+        case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_RGB_LAYERS: {
+            // Broadcast to all connected peripherals
+            for (int i = 0; i < ZMK_SPLIT_BLE_PERIPHERAL_COUNT; i++) {
+                if (peripherals[i].state != PERIPHERAL_SLOT_STATE_CONNECTED)
+                    continue;
+                if (!peripherals[i].update_layers_handle)
+                    continue;
+                int err = bt_gatt_write_without_response(
+                    peripherals[i].conn,
+                    peripherals[i].update_layers_handle,
+                    &payload_wrapper.cmd.data.set_rgb_layers.layers,
+                    sizeof(payload_wrapper.cmd.data.set_rgb_layers.layers), true);
+                if (err) {
+                    LOG_ERR("Failed to send layers to peripheral %d (err %d)", i, err);
+                }
             }
             break;
+        }
 
         default:
             LOG_WRN("Unsupported wrapped central command type %d", payload_wrapper.cmd.type);
