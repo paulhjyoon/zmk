@@ -50,8 +50,9 @@
 
     underglow_indicators: underglow-indicators {
         compatible  = "zmk,underglow-indicators";
-        /* Renamed from bat-lhs to bat-local for dongle-central semantics clarity. */
+        /* Renamed from bat-lhs to bat-local and bat-rhs to bat-detail for dongle-central semantics clarity. */
         bat-local   = <36 30 24 18 12 7>;
+        bat-detail  = <37 31 25 19 13 8>;
         usb-state   = <2>;
     };
 

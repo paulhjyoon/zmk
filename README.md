@@ -17,9 +17,12 @@ The topology change allows both Glove80 halves to work as Bluetooth peripherals 
 - Charge both halves of the Glove80 once every 4 months (often lasting even longer)
 - RGB underglow rendering occurs only on peripheral devices; the dongle central does not render LEDs directly (indicators are only visible on connected Glove80 halves)
 - Each half displays its own battery level on its own underglow LEDs (i.e. the left no longer displays the right half)
+  - The bottom row will display the battery detail offset within the current 20%.
+    - Each LED representing 4% increments with each increment represented by different colours (lilac - magenta - yellow - green)
+    - For example, with the first row showing 5 greens and the second row showing 1 yellow, then the battery level is 83%. If the first row shows 4 green and the second row shows 3 greens and a magenta then the battery level is 74%
   - Remote peripheral battery fetching is intentionally avoided to minimize BLE traffic and power consumption
   - Conscious design decision: active BLE queries for cross-peripheral battery fetching contradict the battery-efficiency objective as it adds four extra BLE communications
-  - For some early versions of the Glove80 with underglow LEDs only on the left half, only the left half's battery level will be displayed
+  - The "Standard Edition" Glove80s in the Kickstarter/Backerkit campaigns do not have RGB LEDs on the right half. So, only the left half's battery level will be displayed
 - RGB underglow indicators changes from the standard Glove80:
   - The USB output will show the status of the dongle's USB output (central)
   - Each peripheral shows its local USB enumeration status at T3
