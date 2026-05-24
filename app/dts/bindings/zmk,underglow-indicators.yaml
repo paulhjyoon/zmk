@@ -17,6 +17,18 @@ properties:
       level would require active BLE queries, conflicting with the battery-efficiency-first model.
       Each Glove80 half has its own underglow LEDs and independently displays its own battery status.
       Preferred name for new configurations (replaces deprecated 'bat-lhs').
+  bat-detail:
+    type: array
+    required: false
+    description: >
+      LED indices indicating the fine precision within the current 20% band.
+      It displays the exact position within the currently active 20% battery band (e.g. 0-19%, 20-39%, etc.) to provide more granular battery level indication.
+      Only LEDs 0-4 are used for precision indication, as LED 5 is reserved for special states (100% or charging).
+      Each of the 5 LEDs represents a 4% increment within the current 20% band, allowing for a more detailed battery level display.
+      The display  uses progressive fill semantics (off = +0, red = +1, yellow = +2, green = +3). Completed blacks remain green while the next LED fills.
+      So the offset within the 20% band is indicated by the color of the LEDs.
+      For example, 0% - all LEDs are off, +1% LED 0 is red, +2% LED 0 is yellow, +3% LED 0 is green, +4% LED 0 is green + LED1 is red,
+      +17% LEDs 0-3 are green + LED 4 is red, +18% LEDs 0-3 are green + LED 4 is yellow, +19% LEDs 0-4 are green.
   bat-left:
     type: array
     required: false

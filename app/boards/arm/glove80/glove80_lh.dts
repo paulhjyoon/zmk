@@ -55,8 +55,10 @@
         layer-state = <35 29 23 17 11 6>;
         /* Renamed from bat-lhs to bat-local for dongle-central semantics clarity. */
         bat-local   = <36 30 24 18 12 7>;
-        /* bat-rhs removed: each half displays only its own battery level to avoid
-         * cross-peripheral battery fetch overhead in battery-efficiency-first setups. */
+        /* Replaced bat-rhs with bat-detail: each half displays only its own battery level to avoid
+         * cross-peripheral battery fetch overhead in battery-efficiency-first setups.
+         * The row is instead used for detailed battery indication. */
+        bat-detail  = <37 31 25 19 13 8>;
         capslock    = <22>;
         numlock     = <16>;
         scrolllock  = <10>;

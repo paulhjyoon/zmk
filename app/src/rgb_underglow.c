@@ -424,15 +424,23 @@ static void zmk_led_write_pixels(void) {
 static int zmk_led_generate_status(void) { return 0; }
 #else
 
-/* GLOVE80_DONGLE: Battery display uses new 'bat-local' property (renamed from deprecated 'bat-lhs' for dongle-central clarity) */
-const uint8_t underglow_bat_local[] = DT_PROP_OR(UNDERGLOW_INDICATORS, bat_local,
-                                                DT_PROP(UNDERGLOW_INDICATORS, bat_lhs));
+/* GLOVE80_DONGLE: Battery display uses new 'bat-local' and 'bat-detail' property (renamed from deprecated 'bat-lhs'
+ * and 'bat-rhs' for dongle-central clarity) */
+const uint8_t underglow_bat_local[] =
+    DT_PROP_OR(UNDERGLOW_INDICATORS, bat_local, DT_PROP(UNDERGLOW_INDICATORS, bat_lhs));
+const uint8_t underglow_bat_detail[] =
+    DT_PROP_OR(UNDERGLOW_INDICATORS, bat_detail, DT_PROP(UNDERGLOW_INDICATORS, bat_rhs));
 
 /* Select property length based on which is available for backwards compatibility */
 #if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, bat_local)
 #define UNDERGLOW_BAT_LEN DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_local)
 #else
 #define UNDERGLOW_BAT_LEN DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_lhs)
+#endif
+#if DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, bat_detail)
+#define UNDERGLOW_BAT_DETAIL_LEN DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_detail)
+#else
+#define UNDERGLOW_BAT_DETAIL_LEN DT_PROP_LEN(UNDERGLOW_INDICATORS, bat_rhs)
 #endif
 
 /* GLOVE80_DONGLE: Local device indicator properties (not RHS-specific in dongle-central topology) */
@@ -462,8 +470,9 @@ const struct led_rgb magenta = HEXRGB(0xff, 0x00, 0xff);
 const struct led_rgb white = HEXRGB(0xff, 0xff, 0xff);
 const struct led_rgb lilac = HEXRGB(0x6b, 0x1f, 0xce);
 
-static void zmk_led_battery_level(int bat_level, const uint8_t *addresses, size_t addresses_len) {
+static void zmk_led_battery_level(int bat_level, const uint8_t *addresses, size_t addresses_len, const uint8_t *detail_addresses, size_t detail_addresses_len) {
     struct led_rgb bat_colour;
+    struct led_rgb increment_colour = red;
 
     if (bat_level >= 40) {
         bat_colour = green;
@@ -473,12 +482,47 @@ static void zmk_led_battery_level(int bat_level, const uint8_t *addresses, size_
         bat_colour = red;
     }
 
-    // originally, six levels, 0 .. 100
-
+    // Coarse LEDs (20% bands)
     for (int i = 0; i < addresses_len; i++) {
         int min_level = (i * 100) / (addresses_len - 1);
         if (bat_level >= min_level) {
             status_pixels[addresses[i]] = bat_colour;
+        }
+    }
+
+    // Detail LEDs (within 20% band)
+    int offset = bat_level % 20;
+
+    int last_led = -1;
+    int last_increment = -1;
+
+    if (offset > 0) {
+        int adj = offset - 1;
+        last_led = adj / 4;
+        last_increment = adj % 4;
+
+        switch (last_increment) {
+            case 0: increment_colour = lilac; break;
+            case 1: increment_colour = magenta; break;
+            case 2: increment_colour = yellow; break;
+            case 3: increment_colour = green; break;
+            default: increment_colour = lilac; break;
+        }
+    }
+
+    if (bat_level >= 100) {
+        for (int i = 0; i < detail_addresses_len; i++) {
+            status_pixels[detail_addresses[i]] = green;
+        }
+    }
+    else if (last_led >= 0) {
+        for (int i = 0; i < detail_addresses_len; i++) {
+            if (i < last_led) {
+                status_pixels[detail_addresses[i]] = green;
+            }
+            else if (i == last_led) {
+                status_pixels[detail_addresses[i]] = increment_colour;
+            }
         }
     }
 }
@@ -495,7 +539,7 @@ static int zmk_led_generate_status(void) {
     // BATTERY STATUS
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
     /* Display local device battery using bat-local property (with fallback to deprecated bat-lhs) */
-    zmk_led_battery_level(zmk_battery_state_of_charge(), underglow_bat_local, UNDERGLOW_BAT_LEN);
+    zmk_led_battery_level(zmk_battery_state_of_charge(), underglow_bat_local, UNDERGLOW_BAT_LEN, underglow_bat_detail, UNDERGLOW_BAT_DETAIL_LEN);
 #endif // CONFIG_ZMK_BATTERY_REPORTING
 
 #if !defined(CONFIG_BOARD_GLOVE80_RH)
