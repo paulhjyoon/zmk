@@ -55,6 +55,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/keymap.h>
 #include <zmk/endpoints.h>
 #include <zmk/usb.h>
+#include <zmk/events/split_peripheral_layer_changed.h>
 
 static int start_scanning(void);
 
@@ -96,6 +97,8 @@ struct peripheral_slot {
     bool last_layer_status_valid;
 #endif
     uint16_t selected_physical_layout_handle;
+    uint16_t update_layers_handle;
+
     uint8_t position_state[POSITION_STATE_DATA_LEN];
     uint8_t last_ble_status_len;
     uint8_t changed_positions[POSITION_STATE_DATA_LEN];
@@ -461,6 +464,7 @@ int release_peripheral_slot(int index) {
     slot->last_ble_status_len = 0;
     slot->last_layer_status_valid = false;
 #endif
+    slot->update_layers_handle = 0;
 
     return 0;
 }
@@ -892,6 +896,10 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
                 (void)send_central_layer_status_to_slot(slot);
             }
 #endif /* IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) */
+        } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
+                                BT_UUID_DECLARE_128(ZMK_SPLIT_BT_UPDATE_LAYERS_UUID))) {
+            LOG_DBG("Found update Layers handle");
+            slot->update_layers_handle = bt_gatt_attr_value_handle(attr);
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE_CENTRAL_BATTERY_LEVEL_FETCHING)
         } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
                                 BT_UUID_BAS_BATTERY_LEVEL)) {
@@ -984,6 +992,8 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
         }
     }
 #endif // IS_ENABLED(CONFIG_ZMK_INPUT_SPLIT)
+
+    subscribed = subscribed && slot->update_layers_handle;
 
     if (subscribed) {
         // Discovery can complete after the first status notification; re-notify to
@@ -1324,6 +1334,7 @@ K_MSGQ_DEFINE(zmk_split_central_split_run_msgq, sizeof(struct central_cmd_wrappe
 
 void split_central_split_run_callback(struct k_work *work) {
     struct central_cmd_wrapper payload_wrapper;
+    int err;
 
     LOG_DBG("");
 
@@ -1356,7 +1367,7 @@ void split_central_split_run_callback(struct k_work *work) {
                         payload.behavior_dev);
             }
 
-            int err = bt_gatt_write_without_response(
+            err = bt_gatt_write_without_response(
                 peripherals[payload_wrapper.source].conn,
                 peripherals[payload_wrapper.source].run_behavior_handle, &payload,
                 sizeof(struct zmk_split_run_behavior_payload), true);
@@ -1382,6 +1393,25 @@ void split_central_split_run_callback(struct k_work *work) {
             break;
         }
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
+        case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_RGB_LAYERS: {
+            // Broadcast to all connected peripherals
+            for (int i = 0; i < ZMK_SPLIT_BLE_PERIPHERAL_COUNT; i++) {
+                if (peripherals[i].state != PERIPHERAL_SLOT_STATE_CONNECTED)
+                    continue;
+                if (!peripherals[i].update_layers_handle)
+                    continue;
+                int err = bt_gatt_write_without_response(
+                    peripherals[i].conn,
+                    peripherals[i].update_layers_handle,
+                    &payload_wrapper.cmd.data.set_rgb_layers.layers,
+                    sizeof(payload_wrapper.cmd.data.set_rgb_layers.layers), true);
+                if (err) {
+                    LOG_ERR("Failed to send layers to peripheral %d (err %d)", i, err);
+                }
+            }
+            break;
+        }
+
         default:
             LOG_WRN("Unsupported wrapped central command type %d", payload_wrapper.cmd.type);
             return;
@@ -1506,6 +1536,7 @@ static int split_central_bt_send_command(uint8_t source,
     }
 
     switch (cmd.type) {
+    case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_RGB_LAYERS:
     case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_HID_INDICATORS:
     case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_SET_PHYSICAL_LAYOUT:
     case ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_INVOKE_BEHAVIOR: {

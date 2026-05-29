@@ -12,9 +12,16 @@
 	chosen {
 		zmk,kscan = &kscan_composite;
 		zmk,matrix-transform = &default_transform;
-		zmk,underglow = &led_strip;
+		/* Dongle underglow uses native RGB PWM LEDs from base board. */
+		zmk,underglow = &pwmleds;
         zmk,backlight = &back_led_backlight;
 		/*zmk,battery   = &vbatt; */
+	};
+
+	underglow-layer {
+		compatible  = "zmk,underglow-layer";
+		/* Central device does not render underglow; rendering handled by peripherals. */
+		pixel-lookup = <>;
 	};
 
 	kscan_composite: kscan_composite {
@@ -67,34 +74,10 @@ RC(6,0)
 };
 
 &pinctrl {
-	spi1_default: spi1_default {
-		group1 {
-			psels = <NRF_PSEL(SPIM_SCK, 0, 13)>,
-				<NRF_PSEL(SPIM_MISO, 0, 14)>,
-				<NRF_PSEL(SPIM_MOSI, 0, 27)>;
-		};
-	};
+	/* SPI1 pinctrl is no longer needed; LED underglow uses native PWM LEDs. */
 };
 
 &spi1 {
-	compatible = "nordic,nrf-spim";
-	/* Cannot be used together with i2c0. */
-	status = "okay";
-	pinctrl-0 = <&spi1_default>;
-	pinctrl-names = "default";
-
-	led_strip: ws2812@0 {
-		compatible = "worldsemi,ws2812-spi";
-
-		/* SPI */
-		reg = <0>; /* ignored, but necessary for SPI bindings */
-		spi-max-frequency = <4000000>;
-
-		/* WS2812 */
-		chain-length = <40>; /* 40 keys have underglow at the moment */
-		spi-one-frame = <0x70>;
-		spi-zero-frame = <0x40>;
-
-		color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>;
-	};
+	/* SPI1 is not used on dongle shield; LED underglow uses native PWM LEDs. */
+	status = "disabled";
 };

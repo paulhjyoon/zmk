@@ -4,9 +4,9 @@
 [![Build](https://github.com/zmkfirmware/zmk/workflows/Build/badge.svg)](https://github.com/zmkfirmware/zmk/actions)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-v2.0%20adopted-ff69b4.svg)](CODE_OF_CONDUCT.md)
 
-## Customised for a Dongle version of the MoErgo Glove80
+## Glove 80 Dongle Overview
 
-> **Inspired by:** [hopg's ZMK repository](https://github.com/hopg/zmk/tree/slice-mk-glove80-rh-rgb)
+> **Inspired by:** [hopg's ZMK repository](https://github.com/hopg/zmk/tree/slice-mk-glove80-rh-rgb) and [darknao's Per key/layer RGB underglow PR](https://github.com/moergo-sc/zmk/pull/36)
 
 The topology change allows both Glove80 halves to work as Bluetooth peripherals with the dongle acting as the central device. It is for a battery efficiency-first setup where the Glove80 is deskbound and you don't want to be recharging the left half every few weeks. In my setup, the dongle is permanently plugged into a KVM and so dongle doesn't need to be moved.
 
