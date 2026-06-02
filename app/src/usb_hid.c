@@ -107,6 +107,14 @@ static int get_report_cb(const struct device *dev, struct usb_setup_packet *setu
             *len = sizeof(*report);
             break;
         }
+#if IS_ENABLED(CONFIG_ZMK_PLOVER_HID)
+        case PLOVER_HID_REPORT_ID: {
+            struct zmk_hid_plover_report *report = zmk_hid_get_plover_report();
+            *data = (uint8_t *)report;
+            *len = sizeof(*report);
+            break;
+        }
+#endif
         default:
             LOG_ERR("Invalid report ID %d requested", setup->wValue & HID_GET_REPORT_ID_MASK);
             return -EINVAL;
@@ -236,7 +244,7 @@ static const struct hid_ops ops = {
     .set_report = set_report_cb,
 };
 
-static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
+int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
     switch (zmk_usb_get_status()) {
     case USB_DC_SUSPEND:
         return usb_wakeup_request();

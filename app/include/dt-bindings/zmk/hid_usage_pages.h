@@ -50,3 +50,4 @@
 #define HID_USAGE_ARCADE (0x91)         // Arcade
 #define HID_USAGE_GAMING (0x92)         // Gaming Device
 #define HID_USAGE_FIDO (0xF1D0)         // FIDO Alliance
+#define HID_USAGE_VENDOR_PLOVER (0x50) // Plover HID keycode page (fits ZMK encoded key format)

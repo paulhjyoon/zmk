@@ -69,6 +69,13 @@ config ZMK_HID_REPORT_TYPE_NKRO
 
 endchoice
 
+menu "Stenography Support"
+
+config ZMK_PLOVER_HID
+    bool "Support for the Plover HID Stenography Protocol"
+
+endmenu # Stenography Support
+
 config ZMK_HID_KEYBOARD_NKRO_EXTENDED_REPORT
     bool "Enable extended NKRO reporting"
     depends on ZMK_HID_REPORT_TYPE_NKRO
@@ -207,6 +214,10 @@ config ZMK_BLE_CONSUMER_REPORT_QUEUE_SIZE
 
 config ZMK_BLE_MOUSE_REPORT_QUEUE_SIZE
     int "Max number of mouse HID reports to queue for sending over BLE"
+    default 20
+
+config ZMK_BLE_PLOVER_HID_REPORT_QUEUE_SIZE
+    int "Max number of plover HID reports to queue for sending over BLE"
     default 20
 
 config ZMK_BLE_CLEAR_BONDS_ON_START
@@ -536,6 +547,7 @@ if ZMK_KSCAN
 config ZMK_KSCAN_EVENT_QUEUE_SIZE
     int "Size of the event queue for KSCAN events to buffer events"
     default 4
+    default 64 if ZMK_PLOVER_HID
 
 endif # ZMK_KSCAN
 
