@@ -233,6 +233,11 @@ static void request_status_fetch_window_for_all_slots(void) {
     }
 }
 
+int zmk_split_central_request_status_fetch_window(void) {
+    request_status_fetch_window_for_all_slots();
+    return 0;
+}
+
 static void central_status_broadcast_work_cb(struct k_work *work);
 K_WORK_DELAYABLE_DEFINE(central_status_broadcast_work, central_status_broadcast_work_cb);
 

@@ -13,6 +13,7 @@
 #include <dt-bindings/zmk/rgb.h>
 #include <zmk/rgb_underglow.h>
 #include <zmk/keymap.h>
+#include <zmk/split/central.h>
 #include <zmk/split/peripheral.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -271,7 +272,9 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                                               .s = (binding->param2 >> 8) & 0xFF,
                                                               .b = binding->param2 & 0xFF});
     case RGB_STATUS_CMD:
-#if IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+        (void)zmk_split_central_request_status_fetch_window();
+#elif IS_ENABLED(CONFIG_ZMK_SPLIT)
         (void)zmk_split_peripheral_request_status_fetch();
 #endif
         return zmk_rgb_underglow_status();
