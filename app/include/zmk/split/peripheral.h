@@ -9,3 +9,4 @@
 #include <zmk/split/transport/types.h>
 
 int zmk_split_peripheral_report_event(const struct zmk_split_transport_peripheral_event *event);
+int zmk_split_peripheral_request_status_fetch(void);

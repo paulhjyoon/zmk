@@ -871,11 +871,13 @@ static void zmk_rgb_underglow_status_update(struct k_timer *timer);
 K_WORK_DEFINE(underglow_write_work, zmk_led_write_pixels_work);
 K_TIMER_DEFINE(underglow_status_update_timer, zmk_rgb_underglow_status_update, NULL);
 
+int zmk_rgb_underglow_status_duration_ms(void) { return 500 + 8000 + 2000; }
+
 static void zmk_rgb_underglow_status_update(struct k_timer *timer) {
     if (!state.status_active)
         return;
     state.status_animation_step++;
-    if (state.status_animation_step > (10000 / 25)) {
+    if (state.status_animation_step > (zmk_rgb_underglow_status_duration_ms() / 25)) {
         state.status_active = false;
         k_timer_stop(&underglow_status_update_timer);
     }

@@ -67,6 +67,15 @@ int zmk_split_peripheral_report_event(const struct zmk_split_transport_periphera
     return active_transport->api->report_event(event);
 }
 
+int zmk_split_peripheral_request_status_fetch(void) {
+    struct zmk_split_transport_peripheral_event ev = {
+        .type = ZMK_SPLIT_TRANSPORT_PERIPHERAL_EVENT_TYPE_STATUS_FETCH_EVENT,
+        .data = {.status_fetch_event = {.active = 1}},
+    };
+
+    return zmk_split_peripheral_report_event(&ev);
+}
+
 static int select_first_available_transport(void) {
     // Transports are sorted by priority, so find the first
     // One that's available, and enable it. Any transport that
