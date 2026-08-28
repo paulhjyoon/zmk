@@ -131,17 +131,21 @@ static ssize_t split_svc_update_indicators(struct bt_conn *conn, const struct bt
 }
 #endif
 
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING)
+/* RH never renders USB/BLE/layer status (see rgb_underglow.c), so it does not need these. */
+#if !defined(CONFIG_BOARD_GLOVE80_RH)
 static struct zmk_split_central_usb_status_payload usb_status_cache;
 static struct zmk_split_central_ble_status_payload ble_status_cache;
 static uint8_t ble_profile_states_cache[MAX(1, ZMK_SPLIT_BLE_STATUS_CACHE_SIZE)];
 static bool usb_status_cache_valid;
 static bool ble_status_cache_valid;
+#endif
 #if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
 static struct zmk_split_central_layer_status_payload layer_status_cache;
 static bool layer_status_cache_valid;
 #endif
 
+#if !defined(CONFIG_BOARD_GLOVE80_RH)
 static void split_svc_update_usb_status_callback(struct k_work *work) {
     zmk_rgb_underglow_set_cached_usb_status(
         (enum zmk_usb_conn_state)usb_status_cache.central_usb_state, usb_status_cache.endpoint_is_usb != 0);
@@ -155,6 +159,7 @@ static void split_svc_update_ble_status_callback(struct k_work *work) {
         ble_profile_states_cache, ble_status_cache.profile_count);
 }
 static K_WORK_DEFINE(split_svc_update_ble_status_work, split_svc_update_ble_status_callback);
+#endif
 
 #if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
 static void split_svc_update_layer_status_callback(struct k_work *work) {
@@ -163,6 +168,7 @@ static void split_svc_update_layer_status_callback(struct k_work *work) {
 static K_WORK_DEFINE(split_svc_update_layer_status_work, split_svc_update_layer_status_callback);
 #endif
 
+#if !defined(CONFIG_BOARD_GLOVE80_RH)
 static ssize_t split_svc_update_usb_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                                            const void *buf, uint16_t len, uint16_t offset,
                                            uint8_t flags) {
@@ -222,6 +228,7 @@ static ssize_t split_svc_update_ble_status(struct bt_conn *conn, const struct bt
     k_work_submit(&split_svc_update_ble_status_work);
     return len;
 }
+#endif /* !defined(CONFIG_BOARD_GLOVE80_RH) */
 
 #if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
 static ssize_t split_svc_update_layer_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -241,7 +248,7 @@ static ssize_t split_svc_update_layer_status(struct bt_conn *conn, const struct 
     return len;
 }
 #endif
-#endif /* IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) */ 
+#endif /* IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING) */
 
 static uint8_t selected_phys_layout = 0;
 
@@ -341,13 +348,15 @@ BT_GATT_SERVICE_DEFINE(
                                BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,
                                split_svc_update_indicators, NULL),
 #endif // IS_ENABLED(CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS)
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING)
+#if !defined(CONFIG_BOARD_GLOVE80_RH)
         BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CENTRAL_USB_STATUS_UUID),
                                BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,
                                split_svc_update_usb_status, NULL),
         BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CENTRAL_BLE_STATUS_UUID),
                                BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,
                                split_svc_update_ble_status, NULL),
+#endif
 #if !defined(CONFIG_BOARD_GLOVE80_RH) && DT_NODE_HAS_PROP(UNDERGLOW_INDICATORS, layer_state)
         BT_GATT_CHARACTERISTIC(BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CENTRAL_LAYER_STATUS_UUID),
                                BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE_ENCRYPT, NULL,

@@ -242,7 +242,7 @@ static void central_status_broadcast_work_cb(struct k_work *work);
 K_WORK_DELAYABLE_DEFINE(central_status_broadcast_work, central_status_broadcast_work_cb);
 
 static int send_central_usb_status_to_slot(struct peripheral_slot *slot) {
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING)
     if (!slot->central_usb_status_handle || !slot->conn) {
         return -ENODEV;
     }
@@ -309,7 +309,7 @@ static void sync_current_hid_indicators_to_connected_slots(void) {
 #endif
 
 static int send_central_ble_status_to_slot(struct peripheral_slot *slot) {
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_BLE)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING)
     if (!slot->central_ble_status_handle || !slot->conn) {
         return -ENODEV;
     }
@@ -345,7 +345,7 @@ static int send_central_ble_status_to_slot(struct peripheral_slot *slot) {
 }
 
 static int send_central_layer_status_to_slot(struct peripheral_slot *slot) {
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING)
     if (!slot->central_layer_status_handle || !slot->conn) {
         return -ENODEV;
     }
@@ -930,7 +930,7 @@ static uint8_t split_central_chrc_discovery_func(struct bt_conn *conn,
                 LOG_DBG("HID indicator sync deferred until security L2");
             }
 #endif
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING)
         } else if (!bt_uuid_cmp(((struct bt_gatt_chrc *)attr->user_data)->uuid,
                                 BT_UUID_DECLARE_128(ZMK_SPLIT_BT_CENTRAL_USB_STATUS_UUID))) {
             LOG_DBG("Found central USB status handle");
@@ -1358,7 +1358,7 @@ static void split_central_security_changed(struct bt_conn *conn, bt_security_t l
     (void)send_current_hid_indicators_to_slot(slot);
 #endif
 
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING)
     (void)send_central_usb_status_to_slot(slot);
 #if IS_ENABLED(CONFIG_ZMK_BLE)
     (void)send_central_ble_status_to_slot(slot);
@@ -1521,11 +1521,11 @@ static int zmk_split_bt_central_listener_cb(const zmk_event_t *eh) {
         k_work_submit(&update_peripherals_selected_layouts_work);
     }
     if (as_zmk_layer_state_changed(eh)) {
-        if (any_status_fetch_active()) {
+        if (IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING) && any_status_fetch_active()) {
             schedule_central_status_broadcast(CENTRAL_STATUS_DIRTY_LAYER);
         }
     }
-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW)
+#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW) && IS_ENABLED(CONFIG_ZMK_SPLIT_CENTRAL_STATUS_FORWARDING)
     if (as_zmk_usb_conn_state_changed(eh)) {
         const struct zmk_usb_conn_state_changed *ev = as_zmk_usb_conn_state_changed(eh);
         if (any_status_fetch_active() &&

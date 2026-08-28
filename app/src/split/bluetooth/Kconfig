@@ -112,4 +112,16 @@ config ZMK_SPLIT_BLE_CENTRAL_STATUS_COALESCE_MS
       Time window (in milliseconds) to coalesce underglow indicator state updates
       (USB, BLE profile, layer status) before broadcasting to peripherals.
 
+config ZMK_SPLIT_CENTRAL_STATUS_FORWARDING
+    bool "Forward central USB/BLE/layer status to peripherals for underglow"
+    default y
+    depends on ZMK_RGB_UNDERGLOW
+    help
+      Adds dedicated split BLE GATT characteristics so the central can push its
+      USB connection state, active BLE profile state, and active layer mask to
+      each peripheral, for underglow status rendering on the peripheral side.
+      Disable this to remove the extra GATT characteristics and central-side
+      broadcast work entirely (e.g. to A/B test battery life against a build
+      with no cross-device status forwarding).
+
 endif # ZMK_SPLIT_BLE
